@@ -120,7 +120,10 @@ class Daemon:
         # 4. 注册 Watchers
         await self._register_watchers()
 
-        # 5. 启动执行引擎
+        # 5. 注册任务处理器
+        self._register_handlers()
+
+        # 6. 启动执行引擎
         asyncio.create_task(self.executor.run())
 
         # 6. 启动 Web 面板
@@ -193,6 +196,15 @@ class Daemon:
             logger.info("[Watcher] 京东监控器已注册 (间隔 %ds)", jd_interval)
 
         logger.info("共注册 %d 个 Watcher", len(self._watchers))
+
+    def _register_handlers(self) -> None:
+        """注册各平台任务处理器到执行引擎。"""
+        from src.handlers import JDSignInHandler, JDFlashSaleHandler, JDCouponHandler
+
+        self.executor.register_handler("jd:sign_in", JDSignInHandler(self.browser_pool))
+        self.executor.register_handler("jd:flash_sale", JDFlashSaleHandler(self.browser_pool))
+        self.executor.register_handler("jd:coupon", JDCouponHandler(self.browser_pool))
+        logger.info("[处理器] 京东任务处理器已注册 (签到/秒杀/领券)")
 
     async def _start_web(self) -> None:
         """启动 FastAPI Web 服务。"""
