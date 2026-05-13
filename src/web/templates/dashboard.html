@@ -1,71 +1,143 @@
 {% extends "base.html" %}
 
+{% block head_extra %}
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    .page-header h2 { font-size: 1.35rem; font-weight: 700; }
+    .page-header .time { font-size: 0.8rem; color: var(--text-secondary); }
+
+    .platform-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    .platform-chip.jd { background: #fff0e6; color: #c2410c; }
+    .platform-chip.taobao { background: #ffe8e8; color: #c41c1c; }
+    .platform-chip.pdd { background: #e8f5e9; color: #2e7d32; }
+    .platform-chip.miniapp { background: #e8eaf6; color: #283593; }
+    .platform-chip .count { font-weight: 400; color: inherit; opacity: 0.7; }
+
+    .empty-state {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+    .empty-state .empty-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
 {% block content %}
-<h2 style="margin-bottom: 1rem;">📊 仪表盘</h2>
+<div class="page-header">
+    <h2>仪表盘</h2>
+    <span class="time" id="current-time"></span>
+</div>
 
 <!-- 统计卡片 -->
-<div class="grid-3">
-    <div class="card stat-card">
-        <div class="number" id="today-earnings">-</div>
-        <div class="label">今日收益 (元)</div>
+<div class="stat-grid">
+    <div class="stat-card">
+        <span class="stat-icon">💰</span>
+        <div class="stat-value" id="today-earnings">-</div>
+        <div class="stat-label">今日收益</div>
     </div>
-    <div class="card stat-card">
-        <div class="number" id="total-earnings">-</div>
-        <div class="label">累计收益 (元)</div>
+    <div class="stat-card">
+        <span class="stat-icon">📦</span>
+        <div class="stat-value" id="total-earnings">-</div>
+        <div class="stat-label">累计收益</div>
     </div>
-    <div class="card stat-card">
-        <div class="number" id="events-today">-</div>
-        <div class="label">今日事件</div>
+    <div class="stat-card">
+        <span class="stat-icon">⚡</span>
+        <div class="stat-value" id="events-today">-</div>
+        <div class="stat-label">今日事件</div>
+    </div>
+    <div class="stat-card">
+        <span class="stat-icon">🟢</span>
+        <div class="stat-value" id="watcher-count">{{ daemon.get_watchers()|length }}</div>
+        <div class="stat-label">运行中 Watcher</div>
     </div>
 </div>
 
 <!-- Watcher 状态 -->
 <div class="card">
-    <h3>📡 Watcher 运行状态</h3>
+    <div class="card-title">📡 Watcher 状态</div>
     <div id="watcher-list">
         {% for w in daemon.get_watchers() %}
         <div class="event-item" data-platform="{{ w.platform }}">
-            <span class="status-dot green"></span>
-            <strong>{{ w.platform }}</strong>
-            <span style="color:#6b7280;margin-left:1rem;">
-                轮询: {{ w.poll_interval }}s
-                | 扫描: <span class="scan-count">{{ w.status_info().scan_count }}</span> 次
-            </span>
+            <span class="event-icon"><span class="status-dot green"></span></span>
+            <div class="event-body">
+                <div class="event-title">
+                    <span class="platform-badge {{ w.platform }}">{{ w.platform }}</span>
+                </div>
+                <div class="event-meta">
+                    轮询间隔 {{ w.poll_interval }}s · 已扫描 <span class="scan-count">{{ w.status_info().scan_count }}</span> 次
+                </div>
+            </div>
         </div>
         {% else %}
-        <p style="color:#9ca3af;">暂无 Watcher 运行</p>
+        <div class="empty-state">
+            <div class="empty-icon">📡</div>
+            <div>暂无 Watcher 运行</div>
+        </div>
         {% endfor %}
     </div>
 </div>
 
 <!-- 最近事件 -->
 <div class="card">
-    <h3>🕐 最近事件</h3>
-    <div id="recent-events">
+    <div class="card-title">🕐 最近事件</div>
+    <div id="recent-events" class="event-list">
         {% set events = daemon.get_executor().status_info().recent %}
         {% for e in events[-10:]|reverse %}
         <div class="event-item">
-            <span class="event-time">{{ e.title }}</span>
-            <span style="float:right;">
-                {% if e.success %}✅{% else %}❌{% endif %}
+            <span class="event-icon">{{ '✅' if e.success else '❌' }}</span>
+            <div class="event-body">
+                <div class="event-title">{{ e.title }}</div>
+                <div class="event-meta">
+                    <span class="platform-badge {{ e.platform }}">{{ e.platform }}</span>
+                    {{ e.detail }}
+                </div>
+            </div>
+            <span class="event-value" style="color: {{ 'var(--success)' if e.success else 'var(--danger)' }};">
                 ¥{{ "%.2f"|format(e.value) }}
             </span>
         </div>
         {% else %}
-        <p style="color:#9ca3af;">暂无事件记录</p>
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div>暂无事件记录</div>
+        </div>
         {% endfor %}
     </div>
 </div>
 
 <script>
+    // 时钟
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('current-time').textContent =
+            now.toLocaleString('zh-CN', { hour12: false });
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
     // 实时更新收益
     function updateEarnings() {
         fetch('/api/earnings')
             .then(r => r.json())
             .then(d => {
-                document.getElementById('today-earnings').textContent = d.today.toFixed(2);
-                document.getElementById('total-earnings').textContent = d.total.toFixed(2);
-            });
+                document.getElementById('today-earnings').textContent = (d.today || 0).toFixed(2);
+                document.getElementById('total-earnings').textContent = (d.total || 0).toFixed(2);
+            })
+            .catch(() => {});
     }
     updateEarnings();
     setInterval(updateEarnings, 10000);
@@ -77,9 +149,7 @@
         const list = document.getElementById('watcher-list');
         watchers.forEach(w => {
             const el = list.querySelector(`[data-platform="${w.platform}"]`);
-            if (el) {
-                el.querySelector('.scan-count').textContent = w.scan_count;
-            }
+            if (el) el.querySelector('.scan-count').textContent = w.scan_count;
         });
         document.getElementById('events-today').textContent = (data.executor?.processed || 0);
     });

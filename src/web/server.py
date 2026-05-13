@@ -6,6 +6,7 @@
 # ================================
 import json
 import asyncio
+import base64
 import sys
 import logging
 from pathlib import Path
@@ -17,7 +18,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from typing import Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -60,12 +61,18 @@ def create_app(daemon) -> FastAPI:
     # ================================
     @app.get("/platforms", response_class=HTMLResponse)
     async def platforms_page(request: Request):
+        # 检查各平台 cookie 状态
+        cookie_status = {}
+        for p in ["jd", "taobao", "pdd", "miniapp"]:
+            cookies = await daemon.auth.load_cookies(p)
+            cookie_status[p] = cookies is not None
         return templates.TemplateResponse(
             request=request,
             name="platforms.html",
             context={
                 "title": "平台状态",
                 "daemon": daemon,
+                "cookie_status": cookie_status,
             },
         )
 
@@ -153,5 +160,127 @@ def create_app(daemon) -> FastAPI:
                 "Connection": "keep-alive",
             },
         )
+
+    # ================================
+    # 登录会话存储
+    # ================================
+    _login_sessions: dict[str, dict] = {}
+
+    # ================================
+    # 登录页面
+    # ================================
+    PLATFORM_NAMES = {"jd": "京东", "taobao": "淘宝", "pdd": "拼多多", "miniapp": "品牌小程序"}
+
+    @app.get("/login/{platform}", response_class=HTMLResponse)
+    async def login_page(request: Request, platform: str):
+        """渲染登录页面。"""
+        if platform not in PLATFORM_NAMES:
+            return templates.TemplateResponse(
+                request=request, name="login.html",
+                context={"title": "登录", "platform": platform,
+                         "platform_name": platform, "daemon": daemon},
+                status_code=404,
+            )
+        return templates.TemplateResponse(
+            request=request, name="login.html",
+            context={"title": f"{PLATFORM_NAMES.get(platform, platform)} 登录",
+                     "platform": platform,
+                     "platform_name": PLATFORM_NAMES.get(platform, platform),
+                     "daemon": daemon},
+        )
+
+    # ================================
+    # API: 开始登录
+    # ================================
+    @app.post("/api/login/{platform}/start")
+    async def api_login_start(platform: str):
+        """启动浏览器并捕获登录页面/二维码。"""
+        session_id = f"{platform}_{int(datetime.now().timestamp())}"
+
+        try:
+            from playwright.async_api import async_playwright
+
+            p = await async_playwright().start()
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            login_url = daemon.auth._platform_domain(platform)
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+
+            # 截取页面截图（包含二维码）
+            screenshot = await page.screenshot(type="png")
+            qr_b64 = base64.b64encode(screenshot).decode()
+
+            _login_sessions[session_id] = {
+                "playwright": p, "browser": browser,
+                "context": context, "page": page,
+                "started_at": datetime.now(timezone.utc),
+                "logged_in": False, "platform": platform,
+            }
+
+            return JSONResponse({"session_id": session_id, "qr_code": qr_b64})
+
+        except Exception as e:
+            logger.warning("[Web登录] %s 启动失败: %s", platform, e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    # ================================
+    # API: 登录状态检测
+    # ================================
+    @app.get("/api/login/{platform}/status")
+    async def api_login_status(platform: str, session_id: str = Query(...)):
+        """检测登录状态，返回最新二维码。"""
+        session = _login_sessions.get(session_id)
+        if not session:
+            return JSONResponse({"error": "会话已过期"})
+
+        try:
+            page = session["page"]
+            context = session["context"]
+
+            # 检测 cookie
+            cookies = await context.cookies()
+            has_session = daemon.auth._has_session_cookie(cookies, platform)
+
+            if has_session:
+                # 登录成功，保存 cookie
+                await daemon.auth._save_cookies(platform, cookies)
+                session["logged_in"] = True
+                # 清理
+                asyncio.create_task(_cleanup_session(session_id))
+                return JSONResponse({"logged_in": True})
+
+            # 刷新截图
+            screenshot = await page.screenshot(type="png")
+            qr_b64 = base64.b64encode(screenshot).decode()
+            elapsed = int((datetime.now(timezone.utc) - session["started_at"]).total_seconds())
+
+            return JSONResponse({
+                "logged_in": False,
+                "qr_code": qr_b64,
+                "elapsed": elapsed,
+            })
+
+        except Exception as e:
+            logger.warning("[Web登录] 状态检测异常: %s", e)
+            return JSONResponse({"error": str(e)})
+
+    # ================================
+    # 异步清理登录会话
+    # ================================
+    async def _cleanup_session(session_id: str):
+        """延迟清理登录会话。"""
+        await asyncio.sleep(2)
+        session = _login_sessions.pop(session_id, None)
+        if session:
+            try:
+                await session["page"].close()
+                await session["context"].close()
+                await session["browser"].close()
+                await session["playwright"].stop()
+            except Exception:
+                pass
 
     return app

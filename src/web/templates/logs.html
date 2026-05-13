@@ -1,36 +1,105 @@
 {% extends "base.html" %}
 
-{% block content %}
-<h2 style="margin-bottom: 1rem;">📋 事件日志</h2>
+{% block head_extra %}
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    .page-header h2 { font-size: 1.35rem; font-weight: 700; }
 
-<div class="card">
-    <div style="margin-bottom:1rem;">
+    .filter-bar {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .filter-bar select {
+        padding: 0.4rem 0.75rem;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        font-size: 0.8rem;
+        background: var(--card);
+        color: var(--text);
+        cursor: pointer;
+    }
+    .filter-bar select:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+
+    .log-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+    .log-table th {
+        text-align: left;
+        padding: 0.6rem 0.5rem;
+        border-bottom: 2px solid var(--border);
+        font-weight: 600;
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .log-table td {
+        padding: 0.6rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+    }
+    .log-table tr:hover td { background: #f9fafb; }
+    .log-table .time-col { font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; }
+    .log-table .value-col { font-weight: 600; text-align: right; }
+    .log-table .status-col { text-align: center; }
+
+    .auto-refresh { font-size: 0.78rem; color: var(--text-secondary); }
+
+    .empty-row td {
+        text-align: center;
+        padding: 2rem !important;
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📋 事件日志</h2>
+    <div class="filter-bar">
         <select id="filter-platform" onchange="loadLogs()">
             <option value="">全部平台</option>
             <option value="jd">京东</option>
             <option value="taobao">淘宝</option>
             <option value="pdd">拼多多</option>
+            <option value="miniapp">品牌小程序</option>
         </select>
-        <select id="filter-status" onchange="loadLogs()" style="margin-left:0.5rem;">
+        <select id="filter-status" onchange="loadLogs()">
             <option value="">全部状态</option>
             <option value="1">成功</option>
             <option value="0">失败</option>
         </select>
+        <span class="auto-refresh" id="refresh-indicator">每 15s 自动刷新</span>
     </div>
+</div>
 
-    <table>
+<div class="card">
+    <table class="log-table">
         <thead>
             <tr>
                 <th>时间</th>
                 <th>平台</th>
                 <th>类型</th>
                 <th>标题</th>
-                <th>价值</th>
-                <th>状态</th>
+                <th style="text-align:right;">价值</th>
+                <th style="text-align:center;">状态</th>
             </tr>
         </thead>
         <tbody id="log-table-body">
-            <tr><td colspan="6" style="text-align:center;color:#9ca3af;">加载中...</td></tr>
+            <tr class="empty-row"><td colspan="6">加载中...</td></tr>
         </tbody>
     </table>
 </div>
@@ -39,33 +108,35 @@
     function loadLogs() {
         const platform = document.getElementById('filter-platform').value;
         const status = document.getElementById('filter-status').value;
-        let url = '/api/events?limit=50';
 
-        fetch(url)
+        fetch('/api/events?limit=50')
             .then(r => r.json())
             .then(d => {
                 const tbody = document.getElementById('log-table-body');
-                const events = (d.events || []).filter(e => {
-                    if (platform && e.platform !== platform) return false;
-                    if (status !== '' && e.success !== parseInt(status)) return false;
-                    return true;
-                });
+                let events = d.events || [];
+
+                if (platform) events = events.filter(e => e.platform === platform);
+                if (status !== '') events = events.filter(e => e.success === parseInt(status));
 
                 if (events.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">暂无记录</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-row"><td colspan="6">暂无记录</td></tr>';
                     return;
                 }
 
                 tbody.innerHTML = events.map(e => `
                     <tr>
-                        <td style="font-size:0.85rem;color:#6b7280;">${e.created_at || '-'}</td>
-                        <td>${e.platform}</td>
-                        <td>${e.event_type}</td>
+                        <td class="time-col">${e.created_at ? e.created_at.replace('T',' ').substr(0,19) : '-'}</td>
+                        <td><span class="platform-badge ${e.platform}">${e.platform}</span></td>
+                        <td style="font-size:0.8rem;color:var(--text-secondary);">${e.event_type || '-'}</td>
                         <td>${e.title || '-'}</td>
-                        <td>¥${(e.value || 0).toFixed(2)}</td>
-                        <td>${e.success ? '✅' : '❌'}</td>
+                        <td class="value-col">¥${(e.value || 0).toFixed(2)}</td>
+                        <td class="status-col">${e.success ? '✅' : '❌'}</td>
                     </tr>
                 `).join('');
+            })
+            .catch(() => {
+                document.getElementById('log-table-body').innerHTML =
+                    '<tr class="empty-row"><td colspan="6">加载失败</td></tr>';
             });
     }
 

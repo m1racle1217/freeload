@@ -1,28 +1,59 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 style="margin-bottom: 1rem;">⚙️ 配置</h2>
+<h2 style="font-size:1.35rem;font-weight:700;margin-bottom:1.5rem;">⚙️ 配置</h2>
 
 <div class="card">
-    <h3>配置文件 (config/config.yaml)</h3>
-    <p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem;">
+    <div class="card-title">📄 配置文件</div>
+    <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;">
         修改配置后需重启 daemon 生效。密码字段已隐藏。
     </p>
-    <pre style="background:#1f2937;color:#e5e7eb;padding:1rem;border-radius:8px;overflow-x:auto;font-size:0.85rem;">
-{{ config_preview }}</pre>
+    <div class="config-block">{{ config_preview }}</div>
 </div>
 
 <div class="card">
-    <h3>环境变量</h3>
-    <table>
+    <div class="card-title">📌 环境变量</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
         <thead>
-            <tr><th>变量</th><th>说明</th></tr>
+            <tr style="border-bottom:2px solid var(--border);">
+                <th style="text-align:left;padding:0.6rem 0.5rem;">变量</th>
+                <th style="text-align:left;padding:0.6rem 0.5rem;">说明</th>
+                <th style="text-align:left;padding:0.6rem 0.5rem;">当前值</th>
+            </tr>
         </thead>
         <tbody>
-            <tr><td>FREELOAD_EMAIL_FROM</td><td>发件邮箱地址</td></tr>
-            <tr><td>FREELOAD_EMAIL_PASS</td><td>邮箱授权码（覆盖配置文件密码）</td></tr>
-            <tr><td>FREELOAD_EMAIL_TO</td><td>收件邮箱地址</td></tr>
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_FROM</td>
+                <td style="padding:0.6rem 0.5rem;">发件邮箱地址</td>
+                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
+                    {{ '已设置' if daemon.config.get('notify','email','from_addr') else '未设置' }}
+                </td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_PASS</td>
+                <td style="padding:0.6rem 0.5rem;">邮箱授权码</td>
+                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
+                    {{ '已设置' if daemon.config.get('notify','email','password') else '未设置' }}
+                </td>
+            </tr>
+            <tr>
+                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_TO</td>
+                <td style="padding:0.6rem 0.5rem;">收件邮箱地址</td>
+                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
+                    {{ '已设置' if daemon.config.get('notify','email','to_addr') else '未设置' }}
+                </td>
+            </tr>
         </tbody>
     </table>
+</div>
+
+<div class="card">
+    <div class="card-title">💡 提示</div>
+    <ul style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8;padding-left:1.25rem;">
+        <li>邮箱配置支持 <strong>config.yaml</strong> 和 <strong>环境变量</strong> 两种方式</li>
+        <li>环境变量优先级高于配置文件</li>
+        <li>SMTP 使用 QQ 邮箱需开启 <strong>SMTP 服务</strong>并获取授权码</li>
+        <li>修改配置后需重启 daemon：<code style="background:#f3f4f6;padding:0.1rem 0.3rem;border-radius:3px;">Ctrl+C</code> 再运行 <code style="background:#f3f4f6;padding:0.1rem 0.3rem;border-radius:3px;">python src/daemon.py</code></li>
+    </ul>
 </div>
 {% endblock %}

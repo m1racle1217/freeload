@@ -5,6 +5,7 @@
 # 导入依赖
 # ================================
 import asyncio
+import socket
 import signal
 import sys
 import logging
@@ -96,6 +97,7 @@ class Daemon:
         self._watchers: list = []
         self._web_server = None
         self._running = False
+        self._actual_web_port = None
 
     # ================================
     # 启动
@@ -132,7 +134,10 @@ class Daemon:
         web_port = self.config.get("web", "port", default=9528)
         print(f"\n{'='*50}")
         print("  ✅ 守护进程已启动")
-        print(f"  🌐 Web 面板: http://{web_host}:{web_port}")
+        if hasattr(self, '_actual_web_port') and self._actual_web_port != web_port:
+            print(f"  🌐 Web 面板: http://{web_host}:{self._actual_web_port} (配置端口 {web_port} 被占用)")
+        else:
+            print(f"  🌐 Web 面板: http://{web_host}:{web_port}")
         print(f"{'='*50}\n")
 
     async def shutdown(self, sig: signal.Signals | None = None) -> None:
@@ -195,14 +200,20 @@ class Daemon:
             from src.web.server import create_app
 
             host = self.config.get("web", "host", default="127.0.0.1")
-            port = self.config.get("web", "port", default=9527)
+            port = self.config.get("web", "port", default=9528)
+
+            # 端口被占用时自动 +1 重试，最多试 10 次
+            actual_port = await self._find_free_port(host, port, max_attempts=10)
+            if actual_port != port:
+                logger.warning("[Web] 端口 %d 被占用，已切换至 %d", port, actual_port)
+            self._actual_web_port = actual_port
 
             app = create_app(self)
 
             config = uvicorn.Config(
                 app,
                 host=host,
-                port=port,
+                port=actual_port,
                 log_level="warning",
                 access_log=False,
             )
@@ -211,6 +222,25 @@ class Daemon:
 
         except Exception as e:
             logger.warning("[Web] Web 面板启动失败: %s", e)
+
+    @staticmethod
+    async def _find_free_port(host: str, start_port: int, max_attempts: int = 10) -> int:
+        """从 start_port 开始检测，返回第一个可用端口。"""
+        loop = asyncio.get_event_loop()
+        for port in range(start_port, start_port + max_attempts):
+            try:
+                sock = await loop.run_in_executor(None, socket.socket, socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    sock.settimeout(1)
+                    # connect_ex 返回 0 表示端口被占用
+                    result = await loop.run_in_executor(None, sock.connect_ex, (host, port))
+                    if result != 0:
+                        return port
+                finally:
+                    sock.close()
+            except Exception:
+                return port
+        return start_port
 
     async def _status_reporter(self) -> None:
         """定时在日志中输出运行状态。"""

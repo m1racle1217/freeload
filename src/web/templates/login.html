@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+<style>
+    .page-header { margin-bottom: 1.5rem; }
+    .page-header h2 { font-size: 1.35rem; font-weight: 700; }
+
+    .login-container {
+        max-width: 480px;
+        margin: 2rem auto;
+        text-align: center;
+    }
+
+    .qr-box {
+        background: var(--card);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    .qr-box .qr-placeholder {
+        width: 280px;
+        height: 280px;
+        margin: 0 auto 1rem;
+        border-radius: 12px;
+        background: #f5f5f5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        overflow: hidden;
+        border: 2px dashed var(--border);
+    }
+    .qr-box .qr-placeholder img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    .qr-box .hint {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        line-height: 1.6;
+    }
+    .qr-box .hint strong {
+        color: var(--text);
+    }
+
+    .login-status {
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+        display: none;
+    }
+    .login-status.loading {
+        display: block;
+        background: #e8f0fe;
+        color: #1a56db;
+    }
+    .login-status.success {
+        display: block;
+        background: #dcfce7;
+        color: #166534;
+    }
+    .login-status.error {
+        display: block;
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.55rem 1.25rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        border: 1px solid var(--border);
+        background: var(--card);
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.15s;
+        text-decoration: none;
+    }
+    .btn:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-primary {
+        background: var(--primary);
+        color: #fff;
+        border-color: var(--primary);
+    }
+    .btn-primary:hover { background: #1a7ae8; color: #fff; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🔑 {{ platform_name }} 登录</h2>
+</div>
+
+<div class="login-container">
+    <div class="login-status" id="login-status">正在启动浏览器...</div>
+
+    <div class="qr-box">
+        <div class="qr-placeholder" id="qr-placeholder">
+            <span id="qr-text">点击下方按钮开始登录</span>
+        </div>
+        <div class="hint">
+            <strong>请使用 {{ platform_name }} App 扫码</strong><br>
+            扫码后等待自动检测登录状态
+        </div>
+    </div>
+
+    <div style="display:flex;gap:0.75rem;justify-content:center;">
+        <button class="btn btn-primary" id="btn-start" onclick="startLogin()">
+            📱 开始登录
+        </button>
+        <a href="/platforms" class="btn">返回</a>
+    </div>
+</div>
+
+<script>
+    let polling = false;
+    let loginSessionId = null;
+
+    function startLogin() {
+        const btn = document.getElementById('btn-start');
+        btn.disabled = true;
+        btn.textContent = '⏳ 启动中...';
+
+        const status = document.getElementById('login-status');
+        status.className = 'login-status loading';
+        status.textContent = '正在打开浏览器...';
+
+        fetch('/api/login/{{ platform }}/start', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.error) {
+                    status.className = 'login-status error';
+                    status.textContent = '❌ ' + d.error;
+                    btn.disabled = false;
+                    btn.textContent = '📱 重试';
+                    return;
+                }
+                loginSessionId = d.session_id;
+                status.textContent = '✅ 浏览器已打开，请扫码登录';
+                if (d.qr_code) {
+                    document.getElementById('qr-placeholder').innerHTML =
+                        '<img src="data:image/png;base64,' + d.qr_code + '" alt="QR Code">';
+                }
+                btn.textContent = '🔄 检测中...';
+                pollStatus();
+            })
+            .catch(err => {
+                status.className = 'login-status error';
+                status.textContent = '❌ 启动失败: ' + err;
+                btn.disabled = false;
+                btn.textContent = '📱 重试';
+            });
+    }
+
+    function pollStatus() {
+        if (!loginSessionId || polling) return;
+        polling = true;
+
+        const status = document.getElementById('login-status');
+        const qrPlaceholder = document.getElementById('qr-placeholder');
+
+        function check() {
+            fetch('/api/login/{{ platform }}/status?session_id=' + loginSessionId)
+                .then(r => r.json())
+                .then(d => {
+                    if (d.qr_code) {
+                        qrPlaceholder.innerHTML =
+                            '<img src="data:image/png;base64,' + d.qr_code + '" alt="QR Code">';
+                    }
+                    if (d.logged_in) {
+                        status.className = 'login-status success';
+                        status.textContent = '✅ 登录成功！即将跳转...';
+                        setTimeout(() => { window.location.href = '/platforms'; }, 1500);
+                        return;
+                    }
+                    if (d.error) {
+                        status.className = 'login-status error';
+                        status.textContent = '❌ ' + d.error;
+                        document.getElementById('btn-start').disabled = false;
+                        document.getElementById('btn-start').textContent = '📱 重试';
+                        return;
+                    }
+                    status.textContent = '📱 等待扫码... (' + (d.elapsed || 0) + 's)';
+                    setTimeout(check, 2000);
+                })
+                .catch(() => {
+                    setTimeout(check, 2000);
+                });
+        }
+        check();
+    }
+</script>
+{% endblock %}
