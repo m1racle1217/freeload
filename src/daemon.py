@@ -268,9 +268,83 @@ class Daemon:
 
 
 # ================================
+# 自动检测并重启旧实例
+# ================================
+async def _auto_restart() -> None:
+    """检测 9527/9528 是否已有 freeload 进程，有则自动 kill 并重启。"""
+    ports = [9527, 9528]
+    for port in ports:
+        try:
+            # 1. 检查端口是否 LISTEN
+            loop = asyncio.get_event_loop()
+            sock = await loop.run_in_executor(None, socket.socket, socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.settimeout(1)
+                result = await loop.run_in_executor(None, sock.connect_ex, ("127.0.0.1", port))
+                if result != 0:
+                    continue  # 端口空闲
+            finally:
+                sock.close()
+
+            # 2. 验证是否为 freeload 实例
+            import urllib.request
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/api/status", method="GET")
+            try:
+                resp = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=3))
+                body = resp.read().decode()
+                if '"running":true' in body or '"running": true' in body:
+                    # 3. 确认是 freeload → kill
+                    pid = None
+                    if sys.platform == "win32":
+                        # Windows 下通过 netstat 找 PID
+                        import subprocess
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: subprocess.run(
+                                ["netstat", "-ano"], capture_output=True, text=True
+                            ),
+                        )
+                        for line in result.stdout.splitlines():
+                            if f"127.0.0.1:{port}" in line and "LISTENING" in line:
+                                parts = line.strip().split()
+                                if parts:
+                                    pid = parts[-1]
+                                    break
+                        if pid:
+                            logger.info("🔄 检测到旧 freeload (PID %s, 端口 %d)，正在重启...", pid, port)
+                            await loop.run_in_executor(
+                                None,
+                                lambda: subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                                       capture_output=True, text=True),
+                            )
+                    else:
+                        # Unix 用 lsof + kill
+                        import subprocess
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: subprocess.run(
+                                ["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True
+                            ),
+                        )
+                        pid = result.stdout.strip()
+                        if pid:
+                            logger.info("🔄 检测到旧 freeload (PID %s, 端口 %d)，正在重启...", pid, port)
+                            await loop.run_in_executor(
+                                None, lambda: subprocess.run(["kill", "-9", pid], capture_output=True)
+                            )
+                    await asyncio.sleep(2)
+                    logger.info("✅ 旧实例已清理")
+            except Exception:
+                pass  # 端口有进程但不是 freeload，不用管
+        except Exception:
+            pass
+
+
+# ================================
 # 入口
 # ================================
 async def main():
+    await _auto_restart()
     daemon = Daemon()
 
     # ================================
