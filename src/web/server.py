@@ -246,8 +246,25 @@ def create_app(daemon) -> FastAPI:
             return JSONResponse({"session_id": session_id, "qr_code": qr_b64})
 
         except Exception as e:
-            logger.warning("[Web登录] %s 启动失败: %s", platform, e)
-            return JSONResponse({"error": str(e)}, status_code=500)
+            error_msg = str(e)
+            logger.warning("[Web登录] %s 启动失败: %s", platform, error_msg)
+            # 清理可能已启动的浏览器资源
+            try:
+                if 'page' in dir(): await page.close()
+                if 'context' in dir(): await context.close()
+                if 'browser' in dir(): await browser.close()
+                if 'p' in dir(): await p.stop()
+            except Exception:
+                pass
+            # ERR_CONNECTION_CLOSED = 反爬拦截，提示用 CLI
+            is_blocked = "ERR_CONNECTION_CLOSED" in error_msg or "ERR_CONNECTION_REFUSED" in error_msg
+            cli_cmd = f"python src/login.py -p {platform}"
+            hint = (
+                f"{platform} 反爬拦截了 headless 浏览器。请用命令行打开可见浏览器扫码：{cli_cmd}"
+                if is_blocked else
+                f"登录失败: {error_msg}"
+            )
+            return JSONResponse({"error": hint, "cli_cmd": cli_cmd, "blocked": is_blocked}, status_code=500)
 
     # ================================
     # API: 登录状态检测

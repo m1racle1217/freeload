@@ -101,7 +101,13 @@
 </div>
 
 <div class="login-container">
-    <div class="login-status" id="login-status">正在启动浏览器...</div>
+    {% if platform in ('taobao', 'pdd') %}
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:1rem;margin-bottom:1rem;font-size:0.85rem;">
+        ⚠️ <strong>{{ platform_name }}</strong> 有较强的反爬机制，Web 端 headless 模式可能被拦截。<br>
+        如失败请在终端执行：<code style="background:#fff;padding:0.15rem 0.4rem;border-radius:3px;border:1px solid #ddd;">python src/login.py -p {{ platform }}</code>
+    </div>
+    {% endif %}
+    <div class="login-status" id="login-status"></div>
 
     <div class="qr-box">
         <div class="qr-placeholder" id="qr-placeholder">
@@ -139,7 +145,11 @@
             .then(d => {
                 if (d.error) {
                     status.className = 'login-status error';
-                    status.textContent = '❌ ' + d.error;
+                    if (d.blocked) {
+                        status.innerHTML = '<strong>⚠️ 该平台拦截了 headless 浏览器</strong><br>请在终端执行：<br><code style="background:#f3f4f6;padding:0.3rem 0.6rem;border-radius:4px;font-size:0.9rem;">' + d.cli_cmd + '</code><br>(会弹出可见浏览器窗口供扫码)';
+                    } else {
+                        status.textContent = '❌ ' + d.error;
+                    }
                     btn.disabled = false;
                     btn.textContent = '📱 重试';
                     return;
