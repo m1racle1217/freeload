@@ -33,9 +33,9 @@ class AuthManager:
         """返回各平台的登录页域名。"""
         domains = {
             "jd": "https://passport.jd.com/new/login.aspx",
-            "taobao": "https://login.taobao.com",
-            "pdd": "https://mms.pinduoduo.com",
-            "miniapp": "https://login.weixin.qq.com",
+            "taobao": "https://login.taobao.com/member/login.jhtml",
+            "pdd": "https://mobile.yangkeduo.com/login.html",
+            "miniapp": "https://open.weixin.qq.com/connect/qrconnect",
         }
         return domains.get(platform, f"https://{platform}.com")
 

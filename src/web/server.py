@@ -86,6 +86,7 @@ def create_app(daemon) -> FastAPI:
             name="config.html",
             context={
                 "title": "配置",
+                "daemon": daemon,
                 "config_preview": json.dumps(
                     daemon.config.to_dict(), ensure_ascii=False, indent=2
                 ),
@@ -135,8 +136,17 @@ def create_app(daemon) -> FastAPI:
     # ================================
     @app.get("/api/events")
     async def api_events(limit: int = 50):
-        tasks = await daemon.storage.get_recent_tasks(limit=limit)
-        return {"events": tasks}
+        # 数据库记录 + executor 内存记录合并
+        db_tasks = await daemon.storage.get_recent_tasks(limit=limit)
+        mem_tasks = daemon.get_executor().status_info().get("recent", [])
+        # 去重：以 id 为 key，内存中的覆盖数据库的
+        merged: dict[str, dict] = {}
+        for t in db_tasks:
+            merged[t.get("id", "")] = t
+        for t in mem_tasks:
+            merged[t.get("id", "")] = t
+        events = sorted(merged.values(), key=lambda x: x.get("created_at", ""), reverse=True)
+        return {"events": events[:limit]}
 
     # ================================
     # SSE: 实时状态推送
@@ -201,9 +211,22 @@ def create_app(daemon) -> FastAPI:
             from playwright.async_api import async_playwright
 
             p = await async_playwright().start()
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-infobars",
+                ],
+            )
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                locale="zh-CN",
+            )
             page = await context.new_page()
+            # 隐藏 webdriver 特征
+            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
             login_url = daemon.auth._platform_domain(platform)
             await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
