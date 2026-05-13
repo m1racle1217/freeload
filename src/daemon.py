@@ -128,9 +128,11 @@ class Daemon:
         asyncio.create_task(self._status_reporter())
 
         self._running = True
+        web_host = self.config.get("web", "host", default="127.0.0.1")
+        web_port = self.config.get("web", "port", default=9528)
         print(f"\n{'='*50}")
         print("  ✅ 守护进程已启动")
-        print("  🌐 Web 面板: http://localhost:9527")
+        print(f"  🌐 Web 面板: http://{web_host}:{web_port}")
         print(f"{'='*50}\n")
 
     async def shutdown(self, sig: signal.Signals | None = None) -> None:

@@ -47,9 +47,9 @@ def create_app(daemon) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         return templates.TemplateResponse(
-            "dashboard.html",
-            {
-                "request": request,
+            request=request,
+            name="dashboard.html",
+            context={
                 "title": "仪表盘",
                 "daemon": daemon,
             },
@@ -61,9 +61,9 @@ def create_app(daemon) -> FastAPI:
     @app.get("/platforms", response_class=HTMLResponse)
     async def platforms_page(request: Request):
         return templates.TemplateResponse(
-            "platforms.html",
-            {
-                "request": request,
+            request=request,
+            name="platforms.html",
+            context={
                 "title": "平台状态",
                 "daemon": daemon,
             },
@@ -75,9 +75,9 @@ def create_app(daemon) -> FastAPI:
     @app.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):
         return templates.TemplateResponse(
-            "config.html",
-            {
-                "request": request,
+            request=request,
+            name="config.html",
+            context={
                 "title": "配置",
                 "config_preview": json.dumps(
                     daemon.config.to_dict(), ensure_ascii=False, indent=2
@@ -91,9 +91,9 @@ def create_app(daemon) -> FastAPI:
     @app.get("/logs", response_class=HTMLResponse)
     async def logs_page(request: Request):
         return templates.TemplateResponse(
-            "logs.html",
-            {
-                "request": request,
+            request=request,
+            name="logs.html",
+            context={
                 "title": "日志",
                 "daemon": daemon,
             },
