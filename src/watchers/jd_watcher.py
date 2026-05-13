@@ -31,10 +31,12 @@ class JDWatcher(BaseWatcher):
     - 东东农场/红包等日常活动
     """
 
-    def __init__(self, event_queue: EventQueue, poll_interval: int = 30):
+    def __init__(self, event_queue: EventQueue, poll_interval: int = 30,
+                 browser_pool=None):
         super().__init__(event_queue, poll_interval)
         self.platform = "jd"
         self.auth = AuthManager()
+        self._browser_pool = browser_pool
         self._last_sign_date: Optional[str] = None
 
     # ================================
@@ -114,62 +116,65 @@ class JDWatcher(BaseWatcher):
         """检测限时秒杀活动。"""
         events: list[WoolEvent] = []
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
+        # 优先使用 BrowserPool，否则独立启动 stealth 浏览器
+        if self._browser_pool is not None:
+            context = await self._browser_pool.acquire_for_platform("jd")
             try:
-                await context.add_cookies(cookies)
-                page = await context.new_page()
-
-                # ================================
-                # 访问秒杀频道
-                # ================================
-                await page.goto(
-                    "https://miaosha.jd.com/",
-                    wait_until="domcontentloaded",
-                    timeout=15000,
-                )
-                await asyncio.sleep(2)
-
-                # ================================
-                # 提取秒杀商品信息
-                # ================================
-                # 简化版：检查页面中"即将开始"或"立即抢购"的元素
-                try:
-                    items = await page.query_selector_all(".miao-item")
-                    for item in items[:5]:  # 最多处理前 5 个
-                        title_el = await item.query_selector(".item-name")
-                        price_el = await item.query_selector(".item-price")
-
-                        title = await title_el.inner_text() if title_el else "未知商品"
-                        price_text = await price_el.inner_text() if price_el else "0"
-
-                        # 只对高价值商品触发高紧急度事件
-                        try:
-                            price = float(price_text.strip().replace("¥", ""))
-                        except ValueError:
-                            price = 0
-
-                        event = WoolEvent(
-                            platform="jd",
-                            event_type="flash_sale",
-                            title=f"京东秒杀: {title[:30]}",
-                            value=max(price * 0.3, 10.0),  # 估值：按省30%算
-                            urgency=8,
-                            url=page.url,
-                            data={"price": price, "source": "miaosha"},
-                        )
-                        events.append(event)
-
-                except Exception:
-                    pass  # 没有秒杀商品或页面结构变化
-
-                await page.close()
-
-            except Exception as e:
-                logger.debug("[京东] 秒杀检测跳过: %s", e)
+                await self._scan_flash_page(context, events)
             finally:
-                await context.close()
-                await browser.close()
+                await self._browser_pool.release(context)
+        else:
+            from src.stealth import create_stealth_browser, create_stealth_context
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser = await create_stealth_browser(p, headless=True)
+                context = await create_stealth_context(browser, inject_cookies=cookies)
+                try:
+                    await self._scan_flash_page(context, events)
+                finally:
+                    await context.close()
+                    await browser.close()
 
         return events
+
+    async def _scan_flash_page(self, context, events: list) -> None:
+        """在指定 context 中扫描秒杀页面。"""
+        page = await context.new_page()
+        try:
+            await page.goto(
+                "https://miaosha.jd.com/",
+                wait_until="domcontentloaded",
+                timeout=15000,
+            )
+            await asyncio.sleep(2)
+
+            try:
+                items = await page.query_selector_all(".miao-item")
+                for item in items[:5]:
+                    title_el = await item.query_selector(".item-name")
+                    price_el = await item.query_selector(".item-price")
+
+                    title = await title_el.inner_text() if title_el else "未知商品"
+                    price_text = await price_el.inner_text() if price_el else "0"
+
+                    try:
+                        price = float(price_text.strip().replace("¥", ""))
+                    except ValueError:
+                        price = 0
+
+                    event = WoolEvent(
+                        platform="jd",
+                        event_type="flash_sale",
+                        title=f"京东秒杀: {title[:30]}",
+                        value=max(price * 0.3, 10.0),
+                        urgency=8,
+                        url=page.url,
+                        data={"price": price, "source": "miaosha"},
+                    )
+                    events.append(event)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug("[京东] 秒杀检测跳过: %s", e)
+        finally:
+            await page.close()

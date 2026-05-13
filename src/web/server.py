@@ -205,28 +205,20 @@ def create_app(daemon) -> FastAPI:
     @app.post("/api/login/{platform}/start")
     async def api_login_start(platform: str):
         """启动浏览器并捕获登录页面/二维码。"""
+        if platform not in PLATFORM_NAMES:
+            return JSONResponse({"error": f"未知平台: {platform}"}, status_code=400)
+
         session_id = f"{platform}_{int(datetime.now().timestamp())}"
 
         try:
             from playwright.async_api import async_playwright
+            from src.stealth import create_stealth_browser, create_stealth_context
 
             p = await async_playwright().start()
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-infobars",
-                ],
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                locale="zh-CN",
-            )
+            # 先尝试 headless，如果失败后面会提示用 CLI
+            browser = await create_stealth_browser(p, headless=True)
+            context = await create_stealth_context(browser)
             page = await context.new_page()
-            # 隐藏 webdriver 特征
-            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
             login_url = daemon.auth._platform_domain(platform)
             await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
@@ -250,10 +242,13 @@ def create_app(daemon) -> FastAPI:
             logger.warning("[Web登录] %s 启动失败: %s", platform, error_msg)
             # 清理可能已启动的浏览器资源
             try:
-                if 'page' in dir(): await page.close()
-                if 'context' in dir(): await context.close()
-                if 'browser' in dir(): await browser.close()
-                if 'p' in dir(): await p.stop()
+                if 'p' in dir() and p:
+                    try:
+                        if 'browser' in locals() and browser:
+                            await browser.close()
+                    except Exception:
+                        pass
+                    await p.stop()
             except Exception:
                 pass
             # ERR_CONNECTION_CLOSED = 反爬拦截，提示用 CLI

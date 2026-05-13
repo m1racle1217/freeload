@@ -186,7 +186,8 @@ class Daemon:
         jd_enabled = self.config.get("platforms", "jd", "enabled", default=True)
         jd_interval = self.config.get("platforms", "jd", "poll_interval", default=30)
         if jd_enabled:
-            watcher = JDWatcher(self.event_queue, poll_interval=jd_interval)
+            watcher = JDWatcher(self.event_queue, poll_interval=jd_interval,
+                                browser_pool=self.browser_pool)
             self._watchers.append(watcher)
             asyncio.create_task(watcher.run())
             logger.info("[Watcher] 京东监控器已注册 (间隔 %ds)", jd_interval)

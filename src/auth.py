@@ -64,94 +64,95 @@ class AuthManager:
     # ================================
     # 弹窗扫码登录
     # ================================
+    async def _wait_for_enter_and_save(
+        self, platform: str, context: BrowserContext
+    ) -> bool:
+        """等待用户按 Enter 后获取 cookie 并保存。"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, input)
+        cookies = await context.cookies()
+        if len(cookies) > 0:
+            await self._save_cookies(platform, cookies)
+            print(f"\n✅ {platform} 登录成功！")
+            return True
+        print(f"\n❌ {platform} 未检测到 cookie，登录可能失败")
+        return False
+
     async def login_platform(self, platform: str) -> bool:
-        """弹出可见浏览器，等待用户扫码登录。
+        """弹出可见浏览器（带反检测伪装），等待用户扫码登录。
 
-        Args:
-            platform: 平台标识 (jd / taobao / pdd / miniapp)
-
-        Returns:
-            登录是否成功
+        流程：
+        1. 先用 Playwright 内置 Chromium + stealth 尝试
+        2. 全部 URL 都被拦截时，尝试用系统 Chrome/Edge（TLS 指纹不同）
+        3. 给出手动导入 cookie 的提示
         """
+        from src.stealth import (
+            create_stealth_browser, create_stealth_context, _detect_available_channel,
+        )
+
         login_url = self._platform_domain(platform)
-        print(f"\n🖥️  正在打开 {platform} 登录页面...")
-        print(f"🔗 地址: {login_url}")
+        fallbacks = self._fallback_urls(platform)
+        urls_to_try = [login_url] + fallbacks
+        system_channel = _detect_available_channel()
+
+        print(f"\n{'='*40}")
+        print(f"  平台: {platform}")
+        print(f"{'='*40 if False else ''}")
+        print(f"🖥️  正在尝试访问 {login_url}...")
         print("📱 请在浏览器中扫码或输入账号密码完成登录")
         print("✅ 登录完成后请回到本窗口按 Enter 键继续")
         print("⏳ 浏览器保持打开，不设超时\n")
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=False,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-infobars",
-                    "--disable-dev-shm-usage",
-                ],
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                locale="zh-CN",
-            )
-            page = await context.new_page()
-            await page.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
+            last_error = ""
+            for attempt, use_system in [(1, False), (2, True)]:
+                if attempt == 2 and not system_channel:
+                    break  # 没有系统浏览器可用
 
-            try:
-                await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+                mode = f"Playwright Chromium" if not use_system else f"系统 {system_channel}"
+                print(f"\n--- 尝试方式: {mode} ---")
 
-                # ================================
-                # 等待用户手动确认（扫码后按 Enter）
-                # ================================
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, input)
+                browser = await create_stealth_browser(
+                    p, headless=False, use_system_chrome=use_system,
+                )
+                context = await create_stealth_context(browser)
+                page = await context.new_page()
 
-                # ================================
-                # 用户确认后，保存当前所有 cookie
-                # ================================
-                cookies = await context.cookies()
-                if len(cookies) > 0:
-                    await self._save_cookies(platform, cookies)
-                    print(f"\n✅ {platform} 登录成功！")
-                    return True
-                else:
-                    print(f"\n❌ {platform} 未检测到 cookie，登录可能失败")
-                    return False
+                for idx, url in enumerate(urls_to_try):
+                    try:
+                        if idx > 0:
+                            print(f"🔁 备选 {idx}/{len(urls_to_try)-1}: {url}")
+                        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        success = await self._wait_for_enter_and_save(platform, context)
+                        if success:
+                            return True
+                        # 有 response 但无 cookie → 尝试下一个 URL
+                        continue
+                    except Exception as e:
+                        last_error = str(e)
+                        if "ERR_CONNECTION_CLOSED" in last_error or "ERR_CONNECTION_REFUSED" in last_error:
+                            if idx == 0 and fallbacks:
+                                pass  # 会尝试 fallback
+                        elif idx > 0:
+                            print(f"  ❌ 备选失败: {e}")
+                        continue
 
-            except Exception as e:
-                error_msg = str(e)
-                # 如果主 URL 连接被拒，尝试备选 URL
-                if "ERR_CONNECTION_CLOSED" in error_msg or "ERR_CONNECTION_REFUSED" in error_msg:
-                    fallbacks = self._fallback_urls(platform)
-                    for fb_url in fallbacks:
-                        try:
-                            print(f"🔁 连接被拒，尝试备选地址: {fb_url}")
-                            await page.goto(fb_url, wait_until="domcontentloaded", timeout=30000)
-                            print("✅ 备选地址可访问")
-                            # 成功访问，继续等待用户扫码
-                            loop = asyncio.get_event_loop()
-                            await loop.run_in_executor(None, input)
-                            cookies = await context.cookies()
-                            if len(cookies) > 0:
-                                await self._save_cookies(platform, cookies)
-                                print(f"\n✅ {platform} 登录成功！")
-                                return True
-                            else:
-                                print(f"\n❌ {platform} 未检测到 cookie，登录可能失败")
-                                return False
-                        except Exception as fb_e:
-                            print(f"  ❌ 备选也失败: {fb_e}")
-                print(f"\n❌ {platform} 登录失败: {e}")
-                print(f"💡 提示: {platform} 可能暂时屏蔽了自动化浏览器")
-                print(f"   请尝试用普通浏览器打开 {login_url} 确认页面可达")
-                return False
-            finally:
                 await page.close()
                 await context.close()
                 await browser.close()
+
+                # 如果内置 Chromium 失败且系统浏览器可用，自动重试
+                if attempt == 1 and system_channel:
+                    print(f"\n🔄 Playwright 内置浏览器被拦截，尝试使用系统 {system_channel}...")
+
+            print(f"\n❌ {platform} 登录失败: {last_error}")
+            if platform in ("taobao", "pdd"):
+                print(f"💡 提示: {platform} 对自动化浏览器限制较严")
+                print(f"   1. 手动复制 cookie 到 cookies/{platform}.json")
+                print(f"   2. 用普通浏览器打开 {login_url} 手动登录后导出 cookie")
+            else:
+                print(f"💡 请检查网络或重试")
+            return False
 
     # ================================
     # Cookie 管理
