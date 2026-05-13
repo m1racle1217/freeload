@@ -73,14 +73,16 @@ class AuthManager:
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
                 # ================================
-                # 等待用户完成登录
+                # 记录初始 cookie，排除页面自带的无关 cookie
                 # ================================
+                initial_cookie_count = len(await context.cookies())
+
                 # ================================
                 # 等待用户完成登录（每 0.5s 检测一次）
                 # ================================
                 for _ in range(LOGIN_TIMEOUT // 500):
                     cookies = await context.cookies()
-                    if self._has_session_cookie(cookies):
+                    if self._has_session_cookie(cookies, platform, initial_cookie_count):
                         # 登录成功，保存 cookie
                         await self._save_cookies(platform, cookies)
                         print(f"\n✅ {platform} 登录成功！")
@@ -129,14 +131,34 @@ class AuthManager:
     async def validate_cookies(self, context: BrowserContext, platform: str) -> bool:
         """校验当前浏览器上下文中的 cookie 是否有效。"""
         cookies = await context.cookies()
-        return self._has_session_cookie(cookies)
+        return self._has_session_cookie(cookies, platform)
 
     # ================================
     # 工具方法
     # ================================
     @staticmethod
-    def _has_session_cookie(cookies: list[dict]) -> bool:
-        """判断是否存在有效的会话 cookie。"""
-        # Playwright 中 session cookie 的 expires 为 -1
-        # 有 3 个以上 cookie 即认为已登录
-        return len(cookies) >= 3
+    def _has_session_cookie(cookies: list[dict], platform: str = "", initial_count: int = 0) -> bool:
+        """判断是否存在有效的登录态 cookie。
+
+        检测策略：
+        1. 优先检查平台特定的会话 cookie 名称
+        2. 兜底：cookie 数量比初始加载时显著增加
+        """
+        # ================================
+        # 各平台登录成功后的特征 cookie 名称
+        # ================================
+        session_cookies = {
+            "jd": ["pt_key", "pt_pin"],              # 京东登录后的关键 cookie
+            "taobao": ["_tb_token_", "cookie2"],      # 淘宝登录特征
+            "pdd": ["_nano_fp", "pdd_user_id"],       # 拼多多登录特征
+            "miniapp": ["session", "token"],           # 小程序通用特征
+        }
+
+        # 优先：检测特定 cookie 是否存在
+        expected = session_cookies.get(platform, [])
+        for name in expected:
+            if any(c.get("name") == name for c in cookies):
+                return True
+
+        # 兜底：新出现大量 cookie（与初始加载时的差值 >= 5）
+        return len(cookies) - initial_count >= 5
