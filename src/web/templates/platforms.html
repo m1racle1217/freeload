@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 style="margin-bottom: 1rem;">📡 平台状态</h2>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>平台</th>
+                <th>状态</th>
+                <th>轮询间隔</th>
+                <th>扫描次数</th>
+                <th>错误次数</th>
+                <th>最后扫描</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in daemon.get_watchers() %}
+            {% set s = w.status_info() %}
+            <tr>
+                <td><strong>{{ w.platform }}</strong></td>
+                <td>
+                    <span class="status-dot {% if s.enabled %}green{% else %}yellow{% endif %}"></span>
+                    {{ "正常" if s.enabled else "已禁用" }}
+                </td>
+                <td>{{ s.poll_interval }}s</td>
+                <td>{{ s.scan_count }}</td>
+                <td>{{ s.error_count }}</td>
+                <td>{{ "刚刚" if s.last_scan_time else "未扫描" }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" style="text-align:center;color:#9ca3af;">暂无 Watcher</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>登录状态</h3>
+    <table>
+        <thead>
+            <tr><th>平台</th><th>Cookie</th><th>最后登录</th></tr>
+        </thead>
+        <tbody id="login-status">
+            {% for p in ['jd', 'taobao', 'pdd', 'miniapp'] %}
+            <tr>
+                <td>{{ p }}</td>
+                <td id="cookie-{{ p }}">检查中...</td>
+                <td>-</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // 检查各平台登录状态
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/status').then(r => r.json()).then(d => {
+            // 通过 watcher 状态推断 cookie
+        });
+    });
+</script>
+{% endblock %}

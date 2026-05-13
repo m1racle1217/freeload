@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 style="margin-bottom: 1rem;">⚙️ 配置</h2>
+
+<div class="card">
+    <h3>配置文件 (config/config.yaml)</h3>
+    <p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem;">
+        修改配置后需重启 daemon 生效。密码字段已隐藏。
+    </p>
+    <pre style="background:#1f2937;color:#e5e7eb;padding:1rem;border-radius:8px;overflow-x:auto;font-size:0.85rem;">
+{{ config_preview }}</pre>
+</div>
+
+<div class="card">
+    <h3>环境变量</h3>
+    <table>
+        <thead>
+            <tr><th>变量</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>FREELOAD_EMAIL_FROM</td><td>发件邮箱地址</td></tr>
+            <tr><td>FREELOAD_EMAIL_PASS</td><td>邮箱授权码（覆盖配置文件密码）</td></tr>
+            <tr><td>FREELOAD_EMAIL_TO</td><td>收件邮箱地址</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

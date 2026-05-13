@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 style="margin-bottom: 1rem;">📊 仪表盘</h2>
+
+<!-- 统计卡片 -->
+<div class="grid-3">
+    <div class="card stat-card">
+        <div class="number" id="today-earnings">-</div>
+        <div class="label">今日收益 (元)</div>
+    </div>
+    <div class="card stat-card">
+        <div class="number" id="total-earnings">-</div>
+        <div class="label">累计收益 (元)</div>
+    </div>
+    <div class="card stat-card">
+        <div class="number" id="events-today">-</div>
+        <div class="label">今日事件</div>
+    </div>
+</div>
+
+<!-- Watcher 状态 -->
+<div class="card">
+    <h3>📡 Watcher 运行状态</h3>
+    <div id="watcher-list">
+        {% for w in daemon.get_watchers() %}
+        <div class="event-item" data-platform="{{ w.platform }}">
+            <span class="status-dot green"></span>
+            <strong>{{ w.platform }}</strong>
+            <span style="color:#6b7280;margin-left:1rem;">
+                轮询: {{ w.poll_interval }}s
+                | 扫描: <span class="scan-count">{{ w.status_info().scan_count }}</span> 次
+            </span>
+        </div>
+        {% else %}
+        <p style="color:#9ca3af;">暂无 Watcher 运行</p>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- 最近事件 -->
+<div class="card">
+    <h3>🕐 最近事件</h3>
+    <div id="recent-events">
+        {% set events = daemon.get_executor().status_info().recent %}
+        {% for e in events[-10:]|reverse %}
+        <div class="event-item">
+            <span class="event-time">{{ e.title }}</span>
+            <span style="float:right;">
+                {% if e.success %}✅{% else %}❌{% endif %}
+                ¥{{ "%.2f"|format(e.value) }}
+            </span>
+        </div>
+        {% else %}
+        <p style="color:#9ca3af;">暂无事件记录</p>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    // 实时更新收益
+    function updateEarnings() {
+        fetch('/api/earnings')
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('today-earnings').textContent = d.today.toFixed(2);
+                document.getElementById('total-earnings').textContent = d.total.toFixed(2);
+            });
+    }
+    updateEarnings();
+    setInterval(updateEarnings, 10000);
+
+    // SSE 状态更新
+    window.addEventListener('status-update', function(e) {
+        const data = e.detail;
+        const watchers = data.watchers || [];
+        const list = document.getElementById('watcher-list');
+        watchers.forEach(w => {
+            const el = list.querySelector(`[data-platform="${w.platform}"]`);
+            if (el) {
+                el.querySelector('.scan-count').textContent = w.scan_count;
+            }
+        });
+        document.getElementById('events-today').textContent = (data.executor?.processed || 0);
+    });
+</script>
+{% endblock %}

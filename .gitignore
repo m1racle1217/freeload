@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 项目配置（不含敏感字段示例配置不忽略）
+config/config.yaml
+
+# Cookie 文件
+cookies/*.json
+
+# 日志
+logs/
+
+# 数据库
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 系统
+.DS_Store
+Thumbs.db
