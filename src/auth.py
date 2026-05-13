@@ -16,7 +16,6 @@ from playwright.async_api import async_playwright, BrowserContext
 # 路径常量
 # ================================
 COOKIE_DIR = Path(__file__).resolve().parent.parent / "cookies"
-LOGIN_TIMEOUT = 120_000  # 登录超时 120 秒
 
 
 # ================================
@@ -62,7 +61,8 @@ class AuthManager:
         print(f"\n🖥️  正在打开 {platform} 登录页面...")
         print(f"🔗 地址: {login_url}")
         print("📱 请在浏览器中扫码或输入账号密码完成登录")
-        print(f"⏳ 等待登录（最长 {LOGIN_TIMEOUT // 1000} 秒）...\n")
+        print("✅ 登录完成后请回到本窗口按 Enter 键继续")
+        print("⏳ 浏览器保持打开，不设超时\n")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False)
@@ -73,24 +73,23 @@ class AuthManager:
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
                 # ================================
-                # 记录初始 cookie，排除页面自带的无关 cookie
+                # 等待用户手动确认（扫码后按 Enter）
                 # ================================
-                initial_cookie_count = len(await context.cookies())
+                # 使用单独线程等待 input，不阻塞事件循环
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, input)
 
                 # ================================
-                # 等待用户完成登录（每 0.5s 检测一次）
+                # 用户确认后，保存当前所有 cookie
                 # ================================
-                for _ in range(LOGIN_TIMEOUT // 500):
-                    cookies = await context.cookies()
-                    if self._has_session_cookie(cookies, platform, initial_cookie_count):
-                        # 登录成功，保存 cookie
-                        await self._save_cookies(platform, cookies)
-                        print(f"\n✅ {platform} 登录成功！")
-                        return True
-                    await asyncio.sleep(0.5)
-
-                print(f"\n⏰ {platform} 登录超时，请重试")
-                return False
+                cookies = await context.cookies()
+                if len(cookies) > 0:
+                    await self._save_cookies(platform, cookies)
+                    print(f"\n✅ {platform} 登录成功！")
+                    return True
+                else:
+                    print(f"\n❌ {platform} 未检测到 cookie，登录可能失败")
+                    return False
 
             except Exception as e:
                 print(f"\n❌ {platform} 登录失败: {e}")
