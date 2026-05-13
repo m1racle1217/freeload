@@ -9,16 +9,19 @@
 pip install -r requirements.txt
 python -m playwright install chromium
 
-# 2. 登录平台（弹出浏览器窗口，扫码即可）
-python src/login.py -p jd
-python src/login.py -p taobao
-python src/login.py -p pdd
-
-# 3. 启动守护进程
+# 2. 启动守护进程
 python src/daemon.py
 
-# 4. 打开 Web 面板
-# http://localhost:9527
+# 3. 打开 Web 面板，在面板中扫码登录各平台
+# http://localhost:9528
+# 平台 → 点击"登录"按钮 → 扫码 → 自动检测完成
+```
+
+也可以命令行单独登录：
+```bash
+python src/login.py -p jd       # 京东
+python src/login.py -p taobao   # 淘宝
+python src/login.py -p pdd      # 拼多多
 ```
 
 ## 架构
@@ -53,14 +56,15 @@ python src/daemon.py
 
 ## Web 面板
 
-访问 `http://localhost:9527`：
+访问 `http://localhost:9528`：
 
 | 页面 | 路由 | 说明 |
 |------|------|------|
 | 📊 仪表盘 | `/` | 收益统计、Watcher 状态、最近事件 |
-| 📡 平台 | `/platforms` | 各平台运行详情、登录状态 |
-| ⚙️ 配置 | `/config` | 配置文件预览 |
+| 📡 平台 | `/platforms` | 各平台运行详情、登录状态、扫码登录入口 |
+| ⚙️ 配置 | `/config` | 配置文件 + 环境变量预览 |
 | 📋 日志 | `/logs` | 可筛选的任务历史记录 |
+| 🔑 登录 | `/login/{platform}` | 截图式扫码登录 |
 
 ## 配置
 
