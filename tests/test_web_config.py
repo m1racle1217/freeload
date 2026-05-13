@@ -26,10 +26,23 @@ class DummyExecutor:
     def status_info(self):
         return {"processed": 0, "success": 0, "recent": []}
 
+    async def _execute_event(self, event):
+        return {"success": True, "detail": f"executed:{event.event_type}", "value": event.value}
+
 
 class DummyAuth:
     async def has_saved_session(self, platform):
         return False
+
+    async def get_saved_session_state(self, platform):
+        return {
+            "platform": platform,
+            "logged_in": False,
+            "verified": False,
+            "label": "未登录",
+            "detail": "请重新登录",
+            "cookie_count": 0,
+        }
 
     @staticmethod
     def _has_session_cookie(cookies, platform):
@@ -58,6 +71,29 @@ class DummyAuth:
     async def _save_cookies(self, platform, cookies, metadata=None):
         self.saved = (platform, cookies, metadata)
 
+    async def inspect_context_login(self, platform, context, preferred_page=None):
+        cookies = await context.cookies()
+        page = preferred_page
+        page_text = await self._safe_page_text(page)
+        return {
+            "confirmed": self.is_login_confirmed(
+                platform,
+                cookies,
+                page_url=page.url,
+                page_text=page_text,
+            ),
+            "cookies": cookies,
+            "page": page,
+            "page_url": page.url,
+            "page_text": page_text,
+            "metadata": self._build_session_metadata(
+                platform,
+                cookies,
+                page_url=page.url,
+                page_text=page_text,
+            ),
+        }
+
 
 class DummyDaemon:
     def __init__(self, config_path: Path):
@@ -68,6 +104,7 @@ class DummyDaemon:
         self.auth = DummyAuth()
         self._running = True
         self.reload_count = 0
+        self.platform_updates = []
 
     def get_watchers(self):
         return []
@@ -78,6 +115,13 @@ class DummyDaemon:
     def reload_config(self):
         self.reload_count += 1
         self.config.load()
+
+    def get_watcher(self, platform):
+        return None
+
+    async def set_platform_enabled(self, platform, enabled):
+        self.platform_updates.append((platform, enabled))
+        return {"platform": platform, "enabled": enabled, "watcher_registered": False}
 
 
 class DummyLocator:
@@ -115,8 +159,8 @@ class ConfigApiTests(unittest.TestCase):
                     },
                     "platforms": {
                         "jd": {"enabled": True, "poll_interval": 30, "value_threshold": 1.0},
-                        "taobao": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
-                        "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
+                        "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
+                        "pdd": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
                         "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
                     },
                     "web": {"host": "127.0.0.1", "port": 9528},
@@ -247,3 +291,25 @@ class ConfigApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.json()["logged_in"])
             self.assertEqual(daemon.auth.saved[0], "pdd")
+
+    def test_set_platform_enabled_endpoint_updates_daemon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            client = TestClient(create_app(daemon))
+
+            response = client.post("/api/platforms/taobao/enabled", json={"enabled": True})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertEqual(daemon.platform_updates, [("taobao", True)])
+
+    def test_run_jd_action_endpoint_executes_real_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            client = TestClient(create_app(daemon))
+
+            response = client.post("/api/platforms/jd/run", json={"action": "coupon"})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertEqual(response.json()["result"]["detail"], "executed:coupon")

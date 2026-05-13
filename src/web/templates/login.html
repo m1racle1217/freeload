@@ -88,8 +88,9 @@
 <div class="login-shell">
     {% if platform in ('taobao', 'pdd') %}
     <div class="login-warning">
-        <strong>{{ platform_name }}</strong> 的反爬机制较强，Web 端的 headless 模式可能被拦截。
-        如果失败，请在终端执行 `python src/login.py -p {{ platform }}`，改用可见浏览器扫码。
+        <strong>{{ platform_name }}</strong> 的反爬机制较强。
+        如果 Web 登录失败，请在仓库根目录执行 `python src/login.py -p {{ platform }}`；
+        如果当前就在 `src` 目录，执行 `python login.py -p {{ platform }}`，改用可见浏览器扫码。
     </div>
     {% endif %}
 
@@ -193,8 +194,14 @@
                         return;
                     }
 
-                    status.className = "login-status loading";
-                    status.textContent = "等待扫码... (" + (data.elapsed || 0) + "s)";
+                    if (data.challenge) {
+                        status.className = "login-status error";
+                        status.textContent = data.challenge;
+                    } else {
+                        status.className = "login-status loading";
+                        status.textContent = "等待扫码... (" + (data.elapsed || 0) + "s)";
+                    }
+
                     setTimeout(check, 2000);
                 })
                 .catch(function() {

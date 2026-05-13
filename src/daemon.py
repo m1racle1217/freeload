@@ -65,6 +65,7 @@ class Daemon:
         )
 
         self._watchers: list = []
+        self._watchers_by_platform: dict[str, object] = {}
         self._web_server = None
         self._running = False
         self._actual_web_port = None
@@ -119,19 +120,21 @@ class Daemon:
     async def _check_logins(self) -> None:
         """Check whether saved cookies are valid for each platform."""
         for platform in ["jd", "taobao", "pdd", "miniapp"]:
-            cookies = await self.auth.load_cookies(platform)
-            if cookies and self.auth._has_session_cookie(cookies, platform):
-                logger.info("[登录] %s: cookie 有效 (%d 条)", platform, len(cookies))
-            else:
-                logger.warning(
-                    "[登录] %s: 未登录，请运行 python src/login.py -p %s",
+            state = await self.auth.get_saved_session_state(platform)
+            if state["logged_in"]:
+                logger.info(
+                    "[登录] %s: %s (%d 条)",
                     platform,
-                    platform,
+                    state["label"],
+                    state["cookie_count"],
                 )
+            else:
+                logger.warning("[登录] %s: %s", platform, state["detail"])
 
     async def _register_watchers(self) -> None:
         """Start enabled platform watchers from config."""
         from src.watchers.jd_watcher import JDWatcher
+        from src.watchers.marketplace_watcher import MarketplaceActivityWatcher
 
         jd_enabled = self.config.get("platforms", "jd", "enabled", default=True)
         jd_interval = self.config.get("platforms", "jd", "poll_interval", default=30)
@@ -142,19 +145,50 @@ class Daemon:
                 browser_pool=self.browser_pool,
             )
             self._watchers.append(watcher)
+            self._watchers_by_platform["jd"] = watcher
             asyncio.create_task(watcher.run())
             logger.info("[Watcher] 京东监控器已注册 (间隔 %ds)", jd_interval)
+
+        for platform, label in (("taobao", "淘宝"), ("pdd", "拼多多")):
+            enabled = self.config.get("platforms", platform, "enabled", default=True)
+            interval = self.config.get("platforms", platform, "poll_interval", default=60)
+            threshold = self.config.get("platforms", platform, "value_threshold", default=1.0)
+            if enabled:
+                watcher = MarketplaceActivityWatcher(
+                    platform,
+                    self.event_queue,
+                    poll_interval=interval,
+                    browser_pool=self.browser_pool,
+                    value_threshold=threshold,
+                )
+                self._watchers.append(watcher)
+                self._watchers_by_platform[platform] = watcher
+                asyncio.create_task(watcher.run())
+                logger.info("[Watcher] %s活动巡检器已注册 (间隔 %ds)", label, interval)
 
         logger.info("共注册 %d 个 Watcher", len(self._watchers))
 
     def _register_handlers(self) -> None:
         """Register task handlers with the executor."""
-        from src.handlers import JDCouponHandler, JDFlashSaleHandler, JDSignInHandler
+        from src.handlers import (
+            JDCouponHandler,
+            JDFlashSaleHandler,
+            JDSignInHandler,
+            MarketplaceActivityHandler,
+        )
 
         self.executor.register_handler("jd:sign_in", JDSignInHandler(self.browser_pool))
         self.executor.register_handler("jd:flash_sale", JDFlashSaleHandler(self.browser_pool))
         self.executor.register_handler("jd:coupon", JDCouponHandler(self.browser_pool))
-        logger.info("[处理器] 京东任务处理器已注册 (签到/秒杀/领券)")
+        self.executor.register_handler(
+            "taobao:activity_check",
+            MarketplaceActivityHandler(self.browser_pool),
+        )
+        self.executor.register_handler(
+            "pdd:activity_check",
+            MarketplaceActivityHandler(self.browser_pool),
+        )
+        logger.info("[处理器] 平台任务处理器已注册 (京东任务 + 淘宝/拼多多活动巡检)")
 
     async def _start_web(self) -> None:
         """Start the FastAPI web service."""
@@ -219,6 +253,9 @@ class Daemon:
     def get_watchers(self) -> list:
         return list(self._watchers)
 
+    def get_watcher(self, platform: str):
+        return self._watchers_by_platform.get(platform)
+
     def get_executor(self) -> Executor:
         return self.executor
 
@@ -237,6 +274,31 @@ class Daemon:
         self.notifier.to_addr = email_cfg.get("to_addr")
         self.browser_pool.pool_size = self.config.get("browser", "pool_size", default=2)
         self.browser_pool.headless = self.config.get("browser", "headless", default=True)
+        for watcher in self._watchers:
+            platform_cfg = self.config.get("platforms", watcher.platform, default={}) or {}
+            watcher.set_enabled(platform_cfg.get("enabled", True))
+            watcher.poll_interval = int(platform_cfg.get("poll_interval", watcher.poll_interval))
+            if hasattr(watcher, "_value_threshold"):
+                setattr(
+                    watcher,
+                    "_value_threshold",
+                    float(platform_cfg.get("value_threshold", getattr(watcher, "_value_threshold", 1.0))),
+                )
+
+    async def set_platform_enabled(self, platform: str, enabled: bool) -> dict:
+        """Persist and apply a platform enabled flag."""
+        self.config.update_platform_enabled(platform, enabled)
+        self.reload_config()
+        watcher = self.get_watcher(platform)
+        state = {
+            "platform": platform,
+            "enabled": bool(enabled),
+            "watcher_registered": watcher is not None,
+        }
+        if watcher is not None:
+            watcher.set_enabled(bool(enabled))
+            state["status"] = watcher.status_info()
+        return state
 
 
 async def _auto_restart() -> None:

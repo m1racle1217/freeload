@@ -26,8 +26,8 @@ class ConfigEditorTests(unittest.TestCase):
                     },
                     "platforms": {
                         "jd": {"enabled": True, "poll_interval": 30, "value_threshold": 1.0},
-                        "taobao": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
-                        "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
+                        "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
+                        "pdd": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
                         "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
                     },
                     "web": {"host": "127.0.0.1", "port": 9528},

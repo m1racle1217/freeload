@@ -90,6 +90,22 @@
     .platform-table th:last-child {
         text-align: right;
     }
+
+    .platform-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .platform-toggle {
+        min-width: 92px;
+    }
+
+    .platform-runner {
+        min-width: 92px;
+    }
 </style>
 {% endblock %}
 
@@ -98,6 +114,9 @@
     <strong>平台与登录状态</strong>
     <p style="margin: 0.45rem 0 0; color: var(--text-secondary); line-height: 1.6;">
         管理各平台的登录、轮询频率和当前监控状态。
+    </p>
+    <p style="margin: 0.45rem 0 0; color: var(--text-secondary); line-height: 1.6;">
+        当前只有京东具备部分自动执行链路；淘宝和拼多多默认关闭，因为目前仅支持活动入口巡检。
     </p>
 </section>
 
@@ -111,27 +130,45 @@
 
     {% for key, icon, name in platforms_data %}
     {% set cfg = daemon.config.get("platforms", key) or {} %}
-    {% set logged_in = cookie_status.get(key, false) %}
+    {% set login_state = login_states.get(key, {}) %}
+    {% set watcher_state = watcher_states.get(key, {}) %}
+    {% set logged_in = login_state.get('logged_in', false) %}
     <div class="platform-card">
         <div class="platform-icon">{{ icon }}</div>
         <div class="platform-info">
             <div class="platform-name">
                 {{ name }}
                 {% if logged_in %}
-                <span class="badge online">已登录</span>
+                <span class="badge online">{{ login_state.get('label', '已登录') }}</span>
                 {% else %}
-                <span class="badge offline">未登录</span>
+                <span class="badge offline">{{ login_state.get('label', '未登录') }}</span>
                 {% endif %}
             </div>
             <div class="platform-meta">
                 <span>轮询 {{ cfg.get('poll_interval', '?') }}s</span>
                 <span>阈值 ¥{{ cfg.get('value_threshold', '?') }}</span>
-                <span>{{ '已启用' if cfg.get('enabled', True) else '已禁用' }}</span>
+                <span>{{ '已启用' if watcher_state.get('enabled', cfg.get('enabled', True)) else '已禁用' }}</span>
+                <span>{{ '运行中' if watcher_state.get('running') else '未运行' }}</span>
+                {% if login_state.get('detail') %}
+                <span>{{ login_state.get('detail') }}</span>
+                {% endif %}
             </div>
         </div>
-        <div>
+        <div class="platform-actions">
+            <button
+                type="button"
+                class="btn platform-toggle"
+                data-platform-toggle="{{ key }}"
+                data-enabled="{{ 'true' if watcher_state.get('enabled', cfg.get('enabled', True)) else 'false' }}"
+            >
+                {{ '停止' if watcher_state.get('enabled', cfg.get('enabled', True)) else '启动' }}
+            </button>
+            {% if key == 'jd' %}
+            <button type="button" class="btn platform-runner" data-platform-run="{{ key }}" data-action="sign_in">签到</button>
+            <button type="button" class="btn platform-runner" data-platform-run="{{ key }}" data-action="coupon">领券</button>
+            {% endif %}
             {% if logged_in %}
-            <span class="btn" style="opacity: 0.7; cursor: default;">会话可用</span>
+            <span class="btn" style="opacity: 0.7; cursor: default;">{{ '已验证' if login_state.get('verified') else '需补登' }}</span>
             {% else %}
             <a href="/login/{{ key }}" class="btn btn-primary">登录</a>
             {% endif %}
@@ -171,4 +208,74 @@
         </tbody>
     </table>
 </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        Array.from(document.querySelectorAll("[data-platform-toggle]")).forEach(function(button) {
+            button.addEventListener("click", function() {
+                var platform = button.dataset.platformToggle;
+                var enabled = button.dataset.enabled === "true";
+                button.disabled = true;
+                button.textContent = enabled ? "停止中..." : "启动中...";
+
+                fetch("/api/platforms/" + platform + "/enabled", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: !enabled })
+                })
+                    .then(function(response) {
+                        return response.json().then(function(data) {
+                            return { status: response.status, body: data };
+                        });
+                    })
+                    .then(function(result) {
+                        if (result.status >= 400 || !result.body.ok) {
+                            throw new Error(result.body.error || "更新失败");
+                        }
+                        window.location.reload();
+                    })
+                    .catch(function(error) {
+                        button.disabled = false;
+                        button.textContent = enabled ? "停止" : "启动";
+                        alert(error.message || error);
+                    });
+            });
+        });
+
+        Array.from(document.querySelectorAll("[data-platform-run]")).forEach(function(button) {
+            button.addEventListener("click", function() {
+                var platform = button.dataset.platformRun;
+                var action = button.dataset.action;
+                var original = button.textContent;
+                button.disabled = true;
+                button.textContent = "执行中...";
+
+                fetch("/api/platforms/" + platform + "/run", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: action })
+                })
+                    .then(function(response) {
+                        return response.json().then(function(data) {
+                            return { status: response.status, body: data };
+                        });
+                    })
+                    .then(function(result) {
+                        button.disabled = false;
+                        button.textContent = original;
+                        if (result.status >= 400 || !result.body.ok) {
+                            throw new Error(result.body.error || "执行失败");
+                        }
+                        var detail = (result.body.result && result.body.result.detail) || "已执行";
+                        alert(detail);
+                    })
+                    .catch(function(error) {
+                        button.disabled = false;
+                        button.textContent = original;
+                        alert(error.message || error);
+                    });
+            });
+        });
+    });
+</script>
 {% endblock %}

@@ -30,8 +30,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "platforms": {
         "jd": {"enabled": True, "poll_interval": 30, "value_threshold": 1.0},
-        "taobao": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
-        "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
+        "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
+        "pdd": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
         "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
     },
     "web": {"host": "127.0.0.1", "port": 9528},
@@ -128,6 +128,24 @@ class Config:
         payload.setdefault("notify", {}).setdefault("email", {})["password"] = ""
         payload["meta"] = {"overrides": self._build_override_meta()}
         return payload
+
+    def to_save_payload(self) -> dict[str, Any]:
+        """Return the current config in the same shape accepted by save_update()."""
+        data = copy.deepcopy(self._data or DEFAULT_CONFIG)
+        return {
+            "notify": {"email": copy.deepcopy(data.get("notify", {}).get("email", {}))},
+            "platforms": copy.deepcopy(data.get("platforms", {})),
+            "web": copy.deepcopy(data.get("web", {})),
+            "browser": copy.deepcopy(data.get("browser", {})),
+        }
+
+    def update_platform_enabled(self, platform: str, enabled: bool) -> dict[str, Any]:
+        """Persist a single platform enabled flag and reload config."""
+        if platform not in DEFAULT_CONFIG["platforms"]:
+            raise ValueError(f"unknown platform: {platform}")
+        payload = self.to_save_payload()
+        payload["platforms"][platform]["enabled"] = bool(enabled)
+        return self.save_update(payload)
 
     def validate_update(self, incoming: dict[str, Any]) -> dict[str, Any]:
         """Normalize and validate a config update payload."""

@@ -27,6 +27,31 @@ PLATFORM_NAMES = {
 }
 
 
+def _login_state_view(state: dict[str, object]) -> dict[str, object]:
+    """Normalize login state for template rendering."""
+    return {
+        "logged_in": bool(state.get("logged_in")),
+        "verified": bool(state.get("verified")),
+        "label": state.get("label") or ("已登录" if state.get("logged_in") else "未登录"),
+        "detail": state.get("detail") or "",
+        "cookie_count": int(state.get("cookie_count") or 0),
+    }
+
+
+def _watcher_state_view(daemon, platform: str) -> dict[str, object]:
+    watcher = daemon.get_watcher(platform) if hasattr(daemon, "get_watcher") else None
+    cfg = daemon.config.get("platforms", platform, default={}) or {}
+    status = watcher.status_info() if watcher is not None else {}
+    return {
+        "registered": watcher is not None,
+        "enabled": bool(cfg.get("enabled", True)),
+        "running": bool(status.get("enabled", False)) if watcher is not None else False,
+        "mode": status.get("mode", "watcher") if watcher is not None else "watcher",
+        "scan_count": int(status.get("scan_count", 0)) if watcher is not None else 0,
+        "error_count": int(status.get("error_count", 0)) if watcher is not None else 0,
+    }
+
+
 def create_app(daemon) -> FastAPI:
     """Create a FastAPI app instance bound to the daemon."""
     app = FastAPI(title="Wool Hunter", version="1.0.0")
@@ -42,16 +67,21 @@ def create_app(daemon) -> FastAPI:
 
     @app.get("/platforms", response_class=HTMLResponse)
     async def platforms_page(request: Request):
-        cookie_status: dict[str, bool] = {}
+        login_states: dict[str, dict[str, object]] = {}
+        watcher_states: dict[str, dict[str, object]] = {}
         for platform in PLATFORM_NAMES:
-            cookie_status[platform] = await daemon.auth.has_saved_session(platform)
+            login_states[platform] = _login_state_view(
+                await daemon.auth.get_saved_session_state(platform)
+            )
+            watcher_states[platform] = _watcher_state_view(daemon, platform)
         return templates.TemplateResponse(
             request=request,
             name="platforms.html",
             context={
                 "title": "平台状态",
                 "daemon": daemon,
-                "cookie_status": cookie_status,
+                "login_states": login_states,
+                "watcher_states": watcher_states,
             },
         )
 
@@ -104,9 +134,54 @@ def create_app(daemon) -> FastAPI:
         )
         return {"events": events[:limit]}
 
+    @app.post("/api/platforms/{platform}/run")
+    async def api_run_platform_action(platform: str, request: Request):
+        if platform != "jd":
+            return JSONResponse({"ok": False, "error": "当前仅支持京东手动执行真实动作"}, status_code=400)
+        try:
+            payload = await request.json()
+            action = str(payload.get("action", "")).strip()
+            action_map = {
+                "sign_in": {"event_type": "sign_in", "title": "京东手动签到", "value": 2.0},
+                "coupon": {"event_type": "coupon", "title": "京东手动领券", "value": 1.0},
+            }
+            if action not in action_map:
+                return JSONResponse({"ok": False, "error": f"不支持的动作: {action}"}, status_code=422)
+            spec = action_map[action]
+            from src.event import WoolEvent
+
+            result = await daemon.get_executor()._execute_event(  # type: ignore[attr-defined]
+                WoolEvent(
+                    platform="jd",
+                    event_type=spec["event_type"],
+                    title=spec["title"],
+                    value=spec["value"],
+                    urgency=7,
+                )
+            )
+            return JSONResponse({"ok": True, "result": result})
+        except Exception as exc:
+            logger.exception("running platform action failed")
+            return JSONResponse({"ok": False, "error": f"执行失败: {exc}"}, status_code=500)
+
     @app.get("/api/config")
     async def api_get_config():
         return daemon.config.to_form_payload()
+
+    @app.post("/api/platforms/{platform}/enabled")
+    async def api_set_platform_enabled(platform: str, request: Request):
+        if platform not in PLATFORM_NAMES:
+            return JSONResponse({"ok": False, "error": f"未知平台: {platform}"}, status_code=400)
+        try:
+            payload = await request.json()
+            enabled = bool(payload.get("enabled"))
+            state = await daemon.set_platform_enabled(platform, enabled)
+            return JSONResponse({"ok": True, "state": state})
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+        except Exception as exc:
+            logger.exception("updating platform enabled failed")
+            return JSONResponse({"ok": False, "error": f"更新失败: {exc}"}, status_code=500)
 
     @app.post("/api/config")
     async def api_save_config(request: Request):
@@ -183,15 +258,36 @@ def create_app(daemon) -> FastAPI:
         try:
             from playwright.async_api import async_playwright
 
-            from src.stealth import create_stealth_browser, create_stealth_context
+            from src.stealth import (
+                _detect_available_channel,
+                create_stealth_browser,
+                create_stealth_context,
+            )
 
             playwright = await async_playwright().start()
-            browser = await create_stealth_browser(playwright, headless=True)
+            login_url = daemon.auth._platform_domain(platform)
+            fallbacks = daemon.auth._fallback_urls(platform)
+            urls_to_try = [login_url] + fallbacks
+            use_system = platform in {"taobao", "pdd"} and bool(_detect_available_channel())
+            browser = await create_stealth_browser(
+                playwright,
+                headless=False,
+                use_system_chrome=use_system,
+            )
             context = await create_stealth_context(browser)
             page = await context.new_page()
+            opened_url = login_url
+            last_error = ""
+            for url in urls_to_try:
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    opened_url = url
+                    break
+                except Exception as exc:
+                    last_error = str(exc)
+            else:
+                raise RuntimeError(last_error or f"无法打开 {platform} 登录页")
 
-            login_url = daemon.auth._platform_domain(platform)
-            await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(2)
 
             screenshot = await page.screenshot(type="png")
@@ -202,6 +298,7 @@ def create_app(daemon) -> FastAPI:
                 "browser": browser,
                 "context": context,
                 "page": page,
+                "opened_url": opened_url,
                 "started_at": datetime.now(timezone.utc),
                 "logged_in": False,
                 "platform": platform,
@@ -225,9 +322,9 @@ def create_app(daemon) -> FastAPI:
                 "ERR_CONNECTION_CLOSED" in error_message
                 or "ERR_CONNECTION_REFUSED" in error_message
             )
-            cli_cmd = f"python src/login.py -p {platform}"
+            cli_cmd = daemon.auth.cli_login_commands(platform)["repo_root"]
             hint = (
-                f"{platform} 反爬拦截了 headless 浏览器。请用命令行打开可见浏览器扫码：{cli_cmd}"
+                f"{platform} 拦截了当前浏览器会话。请改用可见浏览器登录：{daemon.auth.cli_login_hint(platform)}"
                 if is_blocked
                 else f"登录失败: {error_message}"
             )
@@ -243,39 +340,41 @@ def create_app(daemon) -> FastAPI:
             return JSONResponse({"error": "会话已过期"}, status_code=404)
 
         try:
-            page = session["page"]
             context = session["context"]
-            cookies = await context.cookies()
-            page_text = await daemon.auth._safe_page_text(page)
-            has_session = daemon.auth.is_login_confirmed(
+            probe = await daemon.auth.inspect_context_login(
                 platform,
-                cookies,
-                page_url=page.url,
-                page_text=page_text,
+                context,
+                preferred_page=session.get("page"),
             )
 
-            if has_session:
+            if probe["confirmed"]:
                 await daemon.auth._save_cookies(
                     platform,
-                    cookies,
-                    metadata=daemon.auth._build_session_metadata(
-                        platform,
-                        cookies,
-                        page.url,
-                        page_text,
-                    ),
+                    probe["cookies"],
+                    metadata=probe["metadata"],
                 )
                 session["logged_in"] = True
                 asyncio.create_task(_cleanup_session(session_id))
                 return JSONResponse({"logged_in": True})
 
+            page = probe.get("page") or session["page"]
             screenshot = await page.screenshot(type="png")
             qr_code = base64.b64encode(screenshot).decode()
             elapsed = int(
                 (datetime.now(timezone.utc) - session["started_at"]).total_seconds()
             )
             return JSONResponse(
-                {"logged_in": False, "qr_code": qr_code, "elapsed": elapsed}
+                {
+                    "logged_in": False,
+                    "qr_code": qr_code,
+                    "elapsed": elapsed,
+                    "page_url": probe.get("page_url", ""),
+                    "challenge": daemon.auth.login_challenge_reason(
+                        platform,
+                        page_url=str(probe.get("page_url", "")),
+                        page_text=str(probe.get("page_text", "")),
+                    ),
+                }
             )
         except Exception as exc:
             logger.warning("[Web登录] 状态检查异常: %s", exc)
