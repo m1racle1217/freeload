@@ -1,59 +1,679 @@
 {% extends "base.html" %}
 
+{% block head_extra %}
+<style>
+    .config-intro {
+        padding: 1.2rem 1.3rem;
+        margin-bottom: 1rem;
+        border-radius: var(--radius);
+    }
+
+    .config-intro p {
+        margin: 0.45rem 0 0;
+        color: var(--text-secondary);
+        line-height: 1.65;
+    }
+
+    .config-layout {
+        display: grid;
+        grid-template-columns: 180px minmax(0, 1fr) 230px;
+        gap: 1rem;
+    }
+
+    .config-nav {
+        display: block;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        text-align: left;
+        padding: 0.9rem 0.95rem;
+        border-radius: 12px;
+        cursor: pointer;
+        margin-bottom: 0.35rem;
+    }
+
+    .config-nav.active {
+        background: var(--primary-soft);
+        color: var(--text);
+        font-weight: 700;
+    }
+
+    .config-panel,
+    .config-sidebar {
+        padding: 1.1rem;
+        border-radius: var(--radius);
+    }
+
+    .config-panel-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+    }
+
+    .config-panel-header h2 {
+        margin: 0;
+        font-size: 1.08rem;
+    }
+
+    .config-panel-header p {
+        margin: 0.35rem 0 0;
+        color: var(--text-secondary);
+        line-height: 1.55;
+        font-size: 0.9rem;
+    }
+
+    .config-save-state {
+        font-size: 0.86rem;
+        color: var(--text-secondary);
+    }
+
+    .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.95rem;
+    }
+
+    .field-grid .full {
+        grid-column: 1 / -1;
+    }
+
+    .field {
+        display: grid;
+        gap: 0.45rem;
+    }
+
+    .field label,
+    .field > span {
+        font-size: 0.86rem;
+        font-weight: 700;
+    }
+
+    .field small {
+        color: var(--text-secondary);
+        font-weight: 400;
+    }
+
+    .field input {
+        width: 100%;
+        padding: 0.78rem 0.9rem;
+    }
+
+    .field input.invalid,
+    .mini-input.invalid {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 1px rgba(209, 67, 67, 0.22);
+    }
+
+    .field-error {
+        min-height: 1.1rem;
+        color: var(--danger);
+        font-size: 0.8rem;
+    }
+
+    .toggle-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface-muted);
+    }
+
+    .toggle-row strong {
+        display: block;
+        font-size: 0.9rem;
+        margin-bottom: 0.2rem;
+    }
+
+    .toggle-row span {
+        color: var(--text-secondary);
+        font-size: 0.82rem;
+    }
+
+    .platform-list {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .platform-row {
+        display: grid;
+        grid-template-columns: 1.2fr 96px 96px 70px;
+        gap: 0.75rem;
+        align-items: center;
+        padding: 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface-muted);
+    }
+
+    .platform-name strong {
+        display: block;
+        margin-bottom: 0.2rem;
+        font-size: 0.92rem;
+    }
+
+    .platform-name span {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
+
+    .mini-input {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        text-align: center;
+    }
+
+    .switch-wrap {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .config-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.65rem;
+        margin-top: 1.2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+
+    .helper-list {
+        display: grid;
+        gap: 0.8rem;
+    }
+
+    .helper-block {
+        padding: 0.9rem;
+        border-radius: 14px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+    }
+
+    .helper-block strong {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-size: 0.9rem;
+    }
+
+    .helper-block p {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.6;
+        font-size: 0.84rem;
+    }
+
+    .override-item {
+        margin-bottom: 0.65rem;
+    }
+
+    .override-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .override-item strong {
+        display: block;
+        font-size: 0.84rem;
+        margin-bottom: 0.18rem;
+    }
+
+    .override-item div {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        line-height: 1.45;
+    }
+
+    .config-message {
+        margin-top: 0.85rem;
+        padding: 0.8rem 0.95rem;
+        border-radius: 12px;
+        display: none;
+        font-size: 0.88rem;
+    }
+
+    .config-message.success {
+        display: block;
+        background: rgba(20, 148, 90, 0.14);
+        color: var(--success);
+    }
+
+    .config-message.error {
+        display: block;
+        background: rgba(209, 67, 67, 0.14);
+        color: var(--danger);
+    }
+
+    .section-block[hidden] {
+        display: none;
+    }
+
+    @media (max-width: 980px) {
+        .config-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 720px) {
+        .field-grid,
+        .platform-row {
+            grid-template-columns: 1fr;
+        }
+
+        .platform-row {
+            text-align: left;
+        }
+
+        .switch-wrap {
+            justify-content: flex-start;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<h2 style="font-size:1.35rem;font-weight:700;margin-bottom:1.5rem;">⚙️ 配置</h2>
+<section class="panel config-intro">
+    <strong>配置工作台</strong>
+    <p>直接在 WebUI 中修改配置，保存时自动校验并写回 `config/config.yaml`。敏感字段不会明文回显，环境变量覆盖会明确提示。</p>
+</section>
 
-<div class="card">
-    <div class="card-title">📄 配置文件</div>
-    <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;">
-        修改配置后需重启 daemon 生效。密码字段已隐藏。
-    </p>
-    <div class="config-block">{{ config_preview }}</div>
+<div class="config-layout">
+    <nav class="panel config-sidebar" id="config-sections">
+        <button type="button" data-section="notify" class="config-nav active">通知邮箱</button>
+        <button type="button" data-section="platforms" class="config-nav">平台监控</button>
+        <button type="button" data-section="web" class="config-nav">Web 面板</button>
+        <button type="button" data-section="browser" class="config-nav">浏览器</button>
+    </nav>
+
+    <form id="config-form" class="panel config-panel" novalidate>
+        <div class="config-panel-header">
+            <div>
+                <h2>配置详情</h2>
+                <p>按分组维护常用参数。保存成功后建议重启 daemon，确保所有运行组件都使用新配置。</p>
+            </div>
+            <div class="config-save-state" id="config-save-state">未加载</div>
+        </div>
+
+        <section class="section-block" data-config-section="notify">
+            <div class="field-grid">
+                <div class="field">
+                    <label for="smtp_host">SMTP 主机</label>
+                    <input id="smtp_host" name="smtp_host" type="text" required>
+                    <div class="field-error" data-error-for="smtp_host"></div>
+                </div>
+                <div class="field">
+                    <label for="smtp_port">SMTP 端口</label>
+                    <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" required>
+                    <div class="field-error" data-error-for="smtp_port"></div>
+                </div>
+                <div class="field full">
+                    <div class="toggle-row">
+                        <div>
+                            <strong>使用 SSL</strong>
+                            <span>QQ 邮箱通常需要保持开启。</span>
+                        </div>
+                        <input id="use_ssl" name="use_ssl" type="checkbox">
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="from_addr">发件邮箱 <small>可被环境变量覆盖</small></label>
+                    <input id="from_addr" name="from_addr" type="email">
+                    <div class="field-error" data-error-for="from_addr"></div>
+                </div>
+                <div class="field">
+                    <label for="to_addr">收件邮箱</label>
+                    <input id="to_addr" name="to_addr" type="email" required>
+                    <div class="field-error" data-error-for="to_addr"></div>
+                </div>
+                <div class="field full">
+                    <label for="password">邮箱授权码 <small>留空表示保留现有密码</small></label>
+                    <input id="password" name="password" type="password" placeholder="输入新授权码才会覆盖">
+                    <div class="field-error" data-error-for="password"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-block" data-config-section="platforms" hidden>
+            <div class="platform-list">
+                {% set platform_meta = [
+                    ("jd", "京东"),
+                    ("taobao", "淘宝"),
+                    ("pdd", "拼多多"),
+                    ("miniapp", "品牌小程序")
+                ] %}
+                {% for key, label in platform_meta %}
+                <div class="platform-row">
+                    <div class="platform-name">
+                        <strong>{{ label }}</strong>
+                        <span>{{ key }}</span>
+                    </div>
+                    <input class="mini-input" name="{{ key }}_poll_interval" type="number" min="1" step="1" aria-label="{{ label }} 轮询间隔">
+                    <input class="mini-input" name="{{ key }}_value_threshold" type="number" min="0" step="0.1" aria-label="{{ label }} 价值阈值">
+                    <div class="switch-wrap">
+                        <input name="{{ key }}_enabled" type="checkbox" aria-label="{{ label }} enabled">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section-block" data-config-section="web" hidden>
+            <div class="field-grid">
+                <div class="field">
+                    <label for="web_host">监听地址</label>
+                    <input id="web_host" name="web_host" type="text" required>
+                    <div class="field-error" data-error-for="web_host"></div>
+                </div>
+                <div class="field">
+                    <label for="web_port">监听端口</label>
+                    <input id="web_port" name="web_port" type="number" min="1" max="65535" required>
+                    <div class="field-error" data-error-for="web_port"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-block" data-config-section="browser" hidden>
+            <div class="field-grid">
+                <div class="field">
+                    <label for="browser_pool_size">浏览器池大小</label>
+                    <input id="browser_pool_size" name="browser_pool_size" type="number" min="1" step="1" required>
+                    <div class="field-error" data-error-for="browser_pool_size"></div>
+                </div>
+                <div class="field full">
+                    <div class="toggle-row">
+                        <div>
+                            <strong>任务使用无头模式</strong>
+                            <span>登录流程仍可能需要可见浏览器作为回退方式。</span>
+                        </div>
+                        <input id="browser_headless" name="browser_headless" type="checkbox">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div id="config-message" class="config-message"></div>
+
+        <div class="config-actions">
+            <button type="button" id="config-reset">重置更改</button>
+            <button type="submit" class="btn-primary" id="config-save">保存配置</button>
+        </div>
+    </form>
+
+    <aside class="panel config-sidebar">
+        <div class="helper-list">
+            <div class="helper-block">
+                <strong>环境变量覆盖</strong>
+                <div id="config-override-list"></div>
+            </div>
+            <div class="helper-block">
+                <strong>密码处理</strong>
+                <p>授权码不会从服务端回传到浏览器。你只有在输入新值时才会覆盖原密码。</p>
+            </div>
+            <div class="helper-block">
+                <strong>生效提醒</strong>
+                <p>保存会立刻更新配置文件，但为避免运行中的组件继续使用旧值，建议保存后重启 daemon。</p>
+            </div>
+        </div>
+    </aside>
 </div>
 
-<div class="card">
-    <div class="card-title">📌 环境变量</div>
-    <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
-        <thead>
-            <tr style="border-bottom:2px solid var(--border);">
-                <th style="text-align:left;padding:0.6rem 0.5rem;">变量</th>
-                <th style="text-align:left;padding:0.6rem 0.5rem;">说明</th>
-                <th style="text-align:left;padding:0.6rem 0.5rem;">当前值</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_FROM</td>
-                <td style="padding:0.6rem 0.5rem;">发件邮箱地址</td>
-                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
-                    {{ '已设置' if daemon.config.get('notify','email','from_addr') else '未设置' }}
-                </td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_PASS</td>
-                <td style="padding:0.6rem 0.5rem;">邮箱授权码</td>
-                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
-                    {{ '已设置' if daemon.config.get('notify','email','password') else '未设置' }}
-                </td>
-            </tr>
-            <tr>
-                <td style="padding:0.6rem 0.5rem;font-family:monospace;font-size:0.8rem;">FREELOAD_EMAIL_TO</td>
-                <td style="padding:0.6rem 0.5rem;">收件邮箱地址</td>
-                <td style="padding:0.6rem 0.5rem;color:var(--text-secondary);">
-                    {{ '已设置' if daemon.config.get('notify','email','to_addr') else '未设置' }}
-                </td>
-            </tr>
-        </tbody>
-    </table>
-</div>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var form = document.getElementById("config-form");
+        var saveState = document.getElementById("config-save-state");
+        var message = document.getElementById("config-message");
+        var overrideList = document.getElementById("config-override-list");
+        var navButtons = Array.from(document.querySelectorAll("[data-section]"));
+        var sections = Array.from(document.querySelectorAll("[data-config-section]"));
+        var initialState = null;
+        var emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-<div class="card">
-    <div class="card-title">💡 提示</div>
-    <ul style="font-size:0.85rem;color:var(--text-secondary);line-height:1.8;padding-left:1.25rem;">
-        <li>邮箱配置支持 <strong>config.yaml</strong> 和 <strong>环境变量</strong> 两种方式</li>
-        <li>环境变量优先级高于配置文件</li>
-        <li>SMTP 使用 QQ 邮箱需开启 <strong>SMTP 服务</strong>并获取授权码</li>
-        <li>修改配置后需重启 daemon：<code style="background:#f3f4f6;padding:0.1rem 0.3rem;border-radius:3px;">Ctrl+C</code> 再运行 <code style="background:#f3f4f6;padding:0.1rem 0.3rem;border-radius:3px;">python src/daemon.py</code></li>
-    </ul>
-</div>
+        function showSection(name) {
+            navButtons.forEach(function(button) {
+                button.classList.toggle("active", button.dataset.section === name);
+            });
+            sections.forEach(function(section) {
+                section.hidden = section.dataset.configSection !== name;
+            });
+        }
+
+        function setFieldError(name, text) {
+            var input = form[name];
+            var error = document.querySelector('[data-error-for="' + name + '"]');
+            if (input) {
+                input.classList.toggle("invalid", !!text);
+            }
+            if (error) {
+                error.textContent = text || "";
+            }
+        }
+
+        function clearFieldErrors() {
+            Array.from(document.querySelectorAll(".field-error")).forEach(function(node) {
+                node.textContent = "";
+            });
+            Array.from(form.querySelectorAll(".invalid")).forEach(function(node) {
+                node.classList.remove("invalid");
+            });
+        }
+
+        function readForm() {
+            return {
+                notify: {
+                    email: {
+                        smtp_host: form.smtp_host.value.trim(),
+                        smtp_port: Number(form.smtp_port.value),
+                        use_ssl: form.use_ssl.checked,
+                        from_addr: form.from_addr.value.trim(),
+                        password: form.password.value,
+                        to_addr: form.to_addr.value.trim()
+                    }
+                },
+                platforms: {
+                    jd: {
+                        enabled: form.jd_enabled.checked,
+                        poll_interval: Number(form.jd_poll_interval.value),
+                        value_threshold: Number(form.jd_value_threshold.value)
+                    },
+                    taobao: {
+                        enabled: form.taobao_enabled.checked,
+                        poll_interval: Number(form.taobao_poll_interval.value),
+                        value_threshold: Number(form.taobao_value_threshold.value)
+                    },
+                    pdd: {
+                        enabled: form.pdd_enabled.checked,
+                        poll_interval: Number(form.pdd_poll_interval.value),
+                        value_threshold: Number(form.pdd_value_threshold.value)
+                    },
+                    miniapp: {
+                        enabled: form.miniapp_enabled.checked,
+                        poll_interval: Number(form.miniapp_poll_interval.value),
+                        value_threshold: Number(form.miniapp_value_threshold.value)
+                    }
+                },
+                web: {
+                    host: form.web_host.value.trim(),
+                    port: Number(form.web_port.value)
+                },
+                browser: {
+                    pool_size: Number(form.browser_pool_size.value),
+                    headless: form.browser_headless.checked
+                }
+            };
+        }
+
+        function writeForm(config) {
+            form.smtp_host.value = config.notify.email.smtp_host || "";
+            form.smtp_port.value = config.notify.email.smtp_port || "";
+            form.use_ssl.checked = !!config.notify.email.use_ssl;
+            form.from_addr.value = config.notify.email.from_addr || "";
+            form.password.value = "";
+            form.to_addr.value = config.notify.email.to_addr || "";
+
+            ["jd", "taobao", "pdd", "miniapp"].forEach(function(platform) {
+                form[platform + "_enabled"].checked = !!config.platforms[platform].enabled;
+                form[platform + "_poll_interval"].value = config.platforms[platform].poll_interval;
+                form[platform + "_value_threshold"].value = config.platforms[platform].value_threshold;
+            });
+
+            form.web_host.value = config.web.host || "";
+            form.web_port.value = config.web.port || "";
+            form.browser_pool_size.value = config.browser.pool_size || "";
+            form.browser_headless.checked = !!config.browser.headless;
+
+            overrideList.innerHTML = Object.entries(config.meta.overrides).map(function(entry) {
+                var field = entry[0];
+                var meta = entry[1];
+                return [
+                    '<div class="override-item">',
+                    "<strong>" + field + "</strong>",
+                    "<div>" + (meta.active ? ("当前由 " + meta.env_var + " 覆盖") : "当前未被环境变量覆盖") + "</div>",
+                    "</div>"
+                ].join("");
+            }).join("");
+
+            clearFieldErrors();
+            initialState = JSON.stringify(readForm());
+            saveState.textContent = "已加载";
+            message.className = "config-message";
+            message.textContent = "";
+        }
+
+        function updateDirtyState() {
+            saveState.textContent = JSON.stringify(readForm()) === initialState ? "未修改" : "有未保存修改";
+        }
+
+        function setMessage(type, text) {
+            message.className = "config-message " + type;
+            message.textContent = text;
+        }
+
+        function validateClientSide() {
+            clearFieldErrors();
+            var data = readForm();
+            var valid = true;
+
+            if (!data.notify.email.smtp_host) {
+                setFieldError("smtp_host", "SMTP 主机不能为空");
+                valid = false;
+            }
+            if (!Number.isInteger(data.notify.email.smtp_port) || data.notify.email.smtp_port < 1 || data.notify.email.smtp_port > 65535) {
+                setFieldError("smtp_port", "端口必须在 1 到 65535 之间");
+                valid = false;
+            }
+            if (data.notify.email.from_addr && !emailPattern.test(data.notify.email.from_addr)) {
+                setFieldError("from_addr", "发件邮箱格式不正确");
+                valid = false;
+            }
+            if (!data.notify.email.to_addr) {
+                setFieldError("to_addr", "收件邮箱不能为空");
+                valid = false;
+            } else if (!emailPattern.test(data.notify.email.to_addr)) {
+                setFieldError("to_addr", "收件邮箱格式不正确");
+                valid = false;
+            }
+            if (!data.web.host) {
+                setFieldError("web_host", "监听地址不能为空");
+                valid = false;
+            }
+            if (!Number.isInteger(data.web.port) || data.web.port < 1 || data.web.port > 65535) {
+                setFieldError("web_port", "Web 端口必须在 1 到 65535 之间");
+                valid = false;
+            }
+            if (!Number.isInteger(data.browser.pool_size) || data.browser.pool_size < 1) {
+                setFieldError("browser_pool_size", "浏览器池大小必须大于 0");
+                valid = false;
+            }
+
+            ["jd", "taobao", "pdd", "miniapp"].forEach(function(platform) {
+                var interval = data.platforms[platform].poll_interval;
+                var threshold = data.platforms[platform].value_threshold;
+                var intervalInput = form[platform + "_poll_interval"];
+                var thresholdInput = form[platform + "_value_threshold"];
+
+                intervalInput.classList.remove("invalid");
+                thresholdInput.classList.remove("invalid");
+
+                if (!Number.isInteger(interval) || interval < 1) {
+                    intervalInput.classList.add("invalid");
+                    valid = false;
+                }
+                if (Number.isNaN(threshold) || threshold < 0) {
+                    thresholdInput.classList.add("invalid");
+                    valid = false;
+                }
+            });
+
+            if (!valid) {
+                setMessage("error", "请先修正标红字段，再保存配置。");
+            }
+
+            return valid;
+        }
+
+        function loadConfig() {
+            return fetch("/api/config")
+                .then(function(response) { return response.json(); })
+                .then(function(data) { writeForm(data); });
+        }
+
+        navButtons.forEach(function(button) {
+            button.addEventListener("click", function() {
+                showSection(button.dataset.section);
+            });
+        });
+
+        form.addEventListener("input", function() {
+            updateDirtyState();
+            if (message.classList.contains("error")) {
+                validateClientSide();
+            }
+        });
+
+        document.getElementById("config-reset").addEventListener("click", function() {
+            loadConfig();
+        });
+
+        form.addEventListener("submit", function(event) {
+            event.preventDefault();
+            if (!validateClientSide()) {
+                return;
+            }
+
+            fetch("/api/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(readForm())
+            })
+                .then(function(response) {
+                    return response.json().then(function(data) {
+                        return { status: response.status, body: data };
+                    });
+                })
+                .then(function(result) {
+                    if (result.status >= 400 || !result.body.ok) {
+                        setMessage("error", result.body.error || "保存失败");
+                        return;
+                    }
+                    setMessage("success", result.body.message);
+                    if (result.body.config) {
+                        writeForm(result.body.config);
+                    }
+                })
+                .catch(function(error) {
+                    setMessage("error", "保存失败: " + error);
+                });
+        });
+
+        showSection("notify");
+        loadConfig().catch(function() {
+            setMessage("error", "加载配置失败");
+        });
+    });
+</script>
 {% endblock %}

@@ -2,117 +2,96 @@
 
 {% block head_extra %}
 <style>
-    .page-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
+    .dashboard-banner {
+        padding: 1.2rem 1.3rem;
+        margin-bottom: 1rem;
+        border-radius: var(--radius);
     }
-    .page-header h2 { font-size: 1.35rem; font-weight: 700; }
-    .page-header .time { font-size: 0.8rem; color: var(--text-secondary); }
 
-    .platform-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        border-radius: 8px;
-        font-size: 0.85rem;
-        font-weight: 500;
-    }
-    .platform-chip.jd { background: #fff0e6; color: #c2410c; }
-    .platform-chip.taobao { background: #ffe8e8; color: #c41c1c; }
-    .platform-chip.pdd { background: #e8f5e9; color: #2e7d32; }
-    .platform-chip.miniapp { background: #e8eaf6; color: #283593; }
-    .platform-chip .count { font-weight: 400; color: inherit; opacity: 0.7; }
-
-    .empty-state {
-        text-align: center;
-        padding: 2rem;
+    .dashboard-banner p {
+        margin: 0.45rem 0 0;
         color: var(--text-secondary);
-        font-size: 0.9rem;
+        font-size: 0.95rem;
+        line-height: 1.6;
     }
-    .empty-state .empty-icon { font-size: 2rem; margin-bottom: 0.5rem; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>仪表盘</h2>
-    <span class="time" id="current-time"></span>
-</div>
+<section class="panel dashboard-banner">
+    <strong>自动化总览</strong>
+    <p>这里聚合今日收益、Watcher 运行状态和最近执行事件，适合开着长期观察。</p>
+</section>
 
-<!-- 统计卡片 -->
 <div class="stat-grid">
     <div class="stat-card">
-        <span class="stat-icon">💰</span>
+        <span class="stat-icon">¥</span>
         <div class="stat-value" id="today-earnings">-</div>
         <div class="stat-label">今日收益</div>
     </div>
     <div class="stat-card">
-        <span class="stat-icon">📦</span>
+        <span class="stat-icon">Σ</span>
         <div class="stat-value" id="total-earnings">-</div>
         <div class="stat-label">累计收益</div>
     </div>
     <div class="stat-card">
-        <span class="stat-icon">⚡</span>
+        <span class="stat-icon">◉</span>
         <div class="stat-value" id="events-today">-</div>
         <div class="stat-label">今日事件</div>
     </div>
     <div class="stat-card">
-        <span class="stat-icon">🟢</span>
+        <span class="stat-icon">W</span>
         <div class="stat-value" id="watcher-count">{{ daemon.get_watchers()|length }}</div>
-        <div class="stat-label">运行中 Watcher</div>
+        <div class="stat-label">运行中的 Watcher</div>
     </div>
 </div>
 
-<!-- Watcher 状态 -->
 <div class="card">
-    <div class="card-title">📡 Watcher 状态</div>
+    <div class="card-title">Watcher 状态</div>
     <div id="watcher-list">
-        {% for w in daemon.get_watchers() %}
-        <div class="event-item" data-platform="{{ w.platform }}">
+        {% for watcher in daemon.get_watchers() %}
+        <div class="event-item" data-platform="{{ watcher.platform }}">
             <span class="event-icon"><span class="status-dot green"></span></span>
             <div class="event-body">
                 <div class="event-title">
-                    <span class="platform-badge {{ w.platform }}">{{ w.platform }}</span>
+                    <span class="platform-badge {{ watcher.platform }}">{{ watcher.platform }}</span>
                 </div>
                 <div class="event-meta">
-                    轮询间隔 {{ w.poll_interval }}s · 已扫描 <span class="scan-count">{{ w.status_info().scan_count }}</span> 次
+                    轮询间隔 {{ watcher.poll_interval }}s | 已扫描
+                    <span class="scan-count">{{ watcher.status_info().scan_count }}</span> 次
                 </div>
             </div>
         </div>
         {% else %}
         <div class="empty-state">
-            <div class="empty-icon">📡</div>
+            <div class="empty-icon">◎</div>
             <div>暂无 Watcher 运行</div>
         </div>
         {% endfor %}
     </div>
 </div>
 
-<!-- 最近事件 -->
 <div class="card">
-    <div class="card-title">🕐 最近事件</div>
+    <div class="card-title">最近事件</div>
     <div id="recent-events" class="event-list">
         {% set events = daemon.get_executor().status_info().recent %}
-        {% for e in events[-10:]|reverse %}
+        {% for event in events[-10:]|reverse %}
         <div class="event-item">
-            <span class="event-icon">{{ '✅' if e.success else '❌' }}</span>
+            <span class="event-icon">{{ "OK" if event.success else "!" }}</span>
             <div class="event-body">
-                <div class="event-title">{{ e.title }}</div>
+                <div class="event-title">{{ event.title }}</div>
                 <div class="event-meta">
-                    <span class="platform-badge {{ e.platform }}">{{ e.platform }}</span>
-                    {{ e.detail }}
+                    <span class="platform-badge {{ event.platform }}">{{ event.platform }}</span>
+                    {{ event.detail }}
                 </div>
             </div>
-            <span class="event-value" style="color: {{ 'var(--success)' if e.success else 'var(--danger)' }};">
-                ¥{{ "%.2f"|format(e.value) }}
+            <span class="event-value" style="color: {{ 'var(--success)' if event.success else 'var(--danger)' }};">
+                ¥{{ "%.2f"|format(event.value) }}
             </span>
         </div>
         {% else %}
         <div class="empty-state">
-            <div class="empty-icon">📋</div>
+            <div class="empty-icon">≡</div>
             <div>暂无事件记录</div>
         </div>
         {% endfor %}
@@ -120,38 +99,32 @@
 </div>
 
 <script>
-    // 时钟
-    function updateClock() {
-        const now = new Date();
-        document.getElementById('current-time').textContent =
-            now.toLocaleString('zh-CN', { hour12: false });
-    }
-    updateClock();
-    setInterval(updateClock, 1000);
-
-    // 实时更新收益
     function updateEarnings() {
-        fetch('/api/earnings')
-            .then(r => r.json())
-            .then(d => {
-                document.getElementById('today-earnings').textContent = (d.today || 0).toFixed(2);
-                document.getElementById('total-earnings').textContent = (d.total || 0).toFixed(2);
+        fetch("/api/earnings")
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
+                document.getElementById("today-earnings").textContent = (data.today || 0).toFixed(2);
+                document.getElementById("total-earnings").textContent = (data.total || 0).toFixed(2);
             })
-            .catch(() => {});
+            .catch(function() {});
     }
+
     updateEarnings();
     setInterval(updateEarnings, 10000);
 
-    // SSE 状态更新
-    window.addEventListener('status-update', function(e) {
-        const data = e.detail;
-        const watchers = data.watchers || [];
-        const list = document.getElementById('watcher-list');
-        watchers.forEach(w => {
-            const el = list.querySelector(`[data-platform="${w.platform}"]`);
-            if (el) el.querySelector('.scan-count').textContent = w.scan_count;
+    window.addEventListener("status-update", function(event) {
+        var data = event.detail;
+        var watchers = data.watchers || [];
+        var list = document.getElementById("watcher-list");
+        watchers.forEach(function(watcher) {
+            var el = list.querySelector('[data-platform="' + watcher.platform + '"]');
+            if (el) {
+                el.querySelector(".scan-count").textContent = watcher.scan_count;
+            }
         });
-        document.getElementById('events-today').textContent = (data.executor?.processed || 0);
+        document.getElementById("events-today").textContent = data.executor && data.executor.processed
+            ? data.executor.processed
+            : 0;
     });
 </script>
 {% endblock %}

@@ -2,107 +2,120 @@
 
 {% block head_extra %}
 <style>
-    .page-header { margin-bottom: 1.5rem; }
-    .page-header h2 { font-size: 1.35rem; font-weight: 700; }
-
-    .platform-grid { display: flex; flex-direction: column; gap: 1rem; }
+    .platform-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
 
     .platform-card {
-        background: var(--card);
         border-radius: var(--radius);
-        padding: 1.25rem 1.5rem;
-        box-shadow: var(--shadow);
+        padding: 1.15rem 1.3rem;
         display: flex;
         align-items: center;
-        gap: 1.25rem;
-        transition: box-shadow 0.2s;
+        gap: 1rem;
     }
-    .platform-card:hover { box-shadow: var(--shadow-hover); }
 
     .platform-icon {
-        width: 44px; height: 44px;
-        border-radius: 10px;
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         flex-shrink: 0;
+        background: var(--surface-muted);
     }
-    .platform-icon.jd { background: #fff0e6; }
-    .platform-icon.taobao { background: #ffe8e8; }
-    .platform-icon.pdd { background: #e8f5e9; }
-    .platform-icon.miniapp { background: #e8eaf6; }
 
-    .platform-info { flex: 1; min-width: 0; }
-    .platform-info .name { font-weight: 600; font-size: 0.95rem; }
-    .platform-info .name .badge {
-        display: inline-block;
-        margin-left: 0.5rem;
-        padding: 0.1rem 0.45rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        vertical-align: middle;
+    .platform-info {
+        flex: 1;
+        min-width: 0;
     }
-    .platform-info .badge.online { background: #dcfce7; color: #166534; }
-    .platform-info .badge.offline { background: #fee2e2; color: #991b1b; }
 
-    .platform-info .meta {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        margin-top: 0.2rem;
+    .platform-name {
+        font-weight: 700;
+        font-size: 1rem;
+    }
+
+    .platform-meta {
         display: flex;
         gap: 1rem;
         flex-wrap: wrap;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-top: 0.35rem;
     }
 
-    .platform-action { flex-shrink: 0; }
-
-    .btn {
+    .badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.4rem;
-        padding: 0.45rem 1rem;
-        border-radius: 8px;
+        gap: 0.3rem;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.73rem;
+        font-weight: 700;
+        margin-left: 0.5rem;
+    }
+
+    .badge.online {
+        background: rgba(20, 148, 90, 0.14);
+        color: var(--success);
+    }
+
+    .badge.offline {
+        background: rgba(209, 67, 67, 0.14);
+        color: var(--danger);
+    }
+
+    .platform-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+
+    .platform-table th,
+    .platform-table td {
+        padding: 0.8rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .platform-table th {
+        text-align: left;
+        color: var(--text-secondary);
         font-size: 0.8rem;
-        font-weight: 500;
-        border: 1px solid var(--border);
-        background: var(--card);
-        color: var(--text);
-        cursor: pointer;
-        transition: all 0.15s;
-        text-decoration: none;
     }
-    .btn:hover { border-color: var(--primary); color: var(--primary); }
-    .btn-primary {
-        background: var(--primary);
-        color: #fff;
-        border-color: var(--primary);
+
+    .platform-table td:last-child,
+    .platform-table th:last-child {
+        text-align: right;
     }
-    .btn-primary:hover { background: #1a7ae8; color: #fff; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>📡 平台状态</h2>
-</div>
+<section class="panel" style="padding: 1.2rem 1.3rem; margin-bottom: 1rem;">
+    <strong>平台与登录状态</strong>
+    <p style="margin: 0.45rem 0 0; color: var(--text-secondary); line-height: 1.6;">
+        管理各平台的登录、轮询频率和当前监控状态。
+    </p>
+</section>
 
 <div class="platform-grid">
     {% set platforms_data = [
-        ('jd', '🛒', '京东', 'jd'),
-        ('taobao', '🛍️', '淘宝', 'taobao'),
-        ('pdd', '🎁', '拼多多', 'pdd'),
-        ('miniapp', '💬', '品牌小程序', 'miniapp'),
+        ('jd', 'JD', '京东'),
+        ('taobao', 'TB', '淘宝'),
+        ('pdd', 'PD', '拼多多'),
+        ('miniapp', 'MP', '品牌小程序')
     ] %}
 
-    {% for key, icon, name, css_class in platforms_data %}
+    {% for key, icon, name in platforms_data %}
     {% set cfg = daemon.config.get("platforms", key) or {} %}
     {% set logged_in = cookie_status.get(key, false) %}
     <div class="platform-card">
-        <div class="platform-icon {{ css_class }}">{{ icon }}</div>
+        <div class="platform-icon">{{ icon }}</div>
         <div class="platform-info">
-            <div class="name">
+            <div class="platform-name">
                 {{ name }}
                 {% if logged_in %}
                 <span class="badge online">已登录</span>
@@ -110,51 +123,49 @@
                 <span class="badge offline">未登录</span>
                 {% endif %}
             </div>
-            <div class="meta">
-                <span>🔄 {{ cfg.get('poll_interval', '?') }}s 轮询</span>
-                <span>📊 阈值 ¥{{ cfg.get('value_threshold', '?') }}</span>
-                <span>{{ '✅ 已启用' if cfg.get('enabled', True) else '⛔ 已禁用' }}</span>
+            <div class="platform-meta">
+                <span>轮询 {{ cfg.get('poll_interval', '?') }}s</span>
+                <span>阈值 ¥{{ cfg.get('value_threshold', '?') }}</span>
+                <span>{{ '已启用' if cfg.get('enabled', True) else '已禁用' }}</span>
             </div>
         </div>
-        <div class="platform-action">
+        <div>
             {% if logged_in %}
-            <span class="btn" style="opacity:0.6;cursor:default;">✅ 已登录</span>
+            <span class="btn" style="opacity: 0.7; cursor: default;">会话可用</span>
             {% else %}
-            <a href="/login/{{ key }}" class="btn btn-primary">🔑 登录</a>
+            <a href="/login/{{ key }}" class="btn btn-primary">登录</a>
             {% endif %}
         </div>
     </div>
     {% endfor %}
 </div>
 
-<div class="card" style="margin-top: 1.5rem;">
-    <div class="card-title">📊 各平台 Watcher 详情</div>
-    <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
+<div class="card" style="margin-top: 1rem;">
+    <div class="card-title">Watcher 详情</div>
+    <table class="platform-table">
         <thead>
-            <tr style="border-bottom:2px solid var(--border);">
-                <th style="text-align:left;padding:0.6rem 0.5rem;">平台</th>
-                <th style="text-align:left;padding:0.6rem 0.5rem;">状态</th>
-                <th style="text-align:right;padding:0.6rem 0.5rem;">扫描</th>
-                <th style="text-align:right;padding:0.6rem 0.5rem;">错误</th>
+            <tr>
+                <th>平台</th>
+                <th>状态</th>
+                <th>扫描次数</th>
+                <th>错误次数</th>
             </tr>
         </thead>
         <tbody>
-            {% for w in daemon.get_watchers() %}
-            {% set s = w.status_info() %}
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.6rem 0.5rem;">
-                    <span class="platform-badge {{ w.platform }}">{{ w.platform }}</span>
+            {% for watcher in daemon.get_watchers() %}
+            {% set status = watcher.status_info() %}
+            <tr>
+                <td><span class="platform-badge {{ watcher.platform }}">{{ watcher.platform }}</span></td>
+                <td>
+                    <span class="status-dot {{ 'green' if status.enabled else 'yellow' }}"></span>
+                    {{ '运行中' if status.enabled else '已禁用' }}
                 </td>
-                <td style="padding:0.6rem 0.5rem;">
-                    <span class="status-dot {{ 'green' if s.enabled else 'yellow' }}"></span>
-                    {{ '运行中' if s.enabled else '已禁用' }}
-                </td>
-                <td style="text-align:right;padding:0.6rem 0.5rem;">{{ s.scan_count }}</td>
-                <td style="text-align:right;padding:0.6rem 0.5rem;">{{ s.error_count }}</td>
+                <td>{{ status.scan_count }}</td>
+                <td>{{ status.error_count }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="4" style="text-align:center;padding:1rem;color:var(--text-secondary);">暂无 Watcher</td>
+                <td colspan="4" style="text-align: center; color: var(--text-secondary);">暂无 Watcher</td>
             </tr>
             {% endfor %}
         </tbody>
