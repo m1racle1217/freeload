@@ -33,7 +33,7 @@ class AuthManager:
     def _platform_domain(platform: str) -> str:
         """返回各平台的登录页域名。"""
         domains = {
-            "jd": "https://plogin.m.jd.com",
+            "jd": "https://passport.jd.com/new/login.aspx",
             "taobao": "https://login.taobao.com",
             "pdd": "https://mms.pinduoduo.com",
             "miniapp": "https://login.weixin.qq.com",
@@ -70,19 +70,22 @@ class AuthManager:
             page = await context.new_page()
 
             try:
-                await page.goto(login_url, wait_until="networkidle", timeout=30000)
+                await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
 
                 # ================================
                 # 等待用户完成登录
                 # ================================
-                for _ in range(LOGIN_TIMEOUT // 1000):
+                # ================================
+                # 等待用户完成登录（每 0.5s 检测一次）
+                # ================================
+                for _ in range(LOGIN_TIMEOUT // 500):
                     cookies = await context.cookies()
                     if self._has_session_cookie(cookies):
                         # 登录成功，保存 cookie
                         await self._save_cookies(platform, cookies)
                         print(f"\n✅ {platform} 登录成功！")
                         return True
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5)
 
                 print(f"\n⏰ {platform} 登录超时，请重试")
                 return False
@@ -133,7 +136,7 @@ class AuthManager:
     # ================================
     @staticmethod
     def _has_session_cookie(cookies: list[dict]) -> bool:
-        """简单判断 cookie 列表中是否包含有效的会话信息。"""
-        # 至少应有一个非过期、与登录态相关的 cookie
-        valid = [c for c in cookies if not c.get("expires") or c["expires"] > 0]
-        return len(valid) >= 3
+        """判断是否存在有效的会话 cookie。"""
+        # Playwright 中 session cookie 的 expires 为 -1
+        # 有 3 个以上 cookie 即认为已登录
+        return len(cookies) >= 3
