@@ -40,6 +40,22 @@ class AuthManager:
         return domains.get(platform, f"https://{platform}.com")
 
     @staticmethod
+    def _fallback_urls(platform: str) -> list[str]:
+        """返回各平台备选登录 URL。"""
+        fallbacks = {
+            "taobao": [
+                "https://login.taobao.com/",
+                "https://login.m.taobao.com/login.htm",
+                "https://www.taobao.com/",
+            ],
+            "pdd": [
+                "https://www.pinduoduo.com/",
+                "https://mobile.yangkeduo.com/",
+            ],
+        }
+        return fallbacks.get(platform, [])
+
+    @staticmethod
     def _cookie_path(platform: str) -> Path:
         """返回 cookie 文件路径。"""
         COOKIE_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,9 +81,24 @@ class AuthManager:
         print("⏳ 浏览器保持打开，不设超时\n")
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            context = await browser.new_context()
+            browser = await p.chromium.launch(
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                locale="zh-CN",
+            )
             page = await context.new_page()
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
 
             try:
                 await page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
@@ -75,7 +106,6 @@ class AuthManager:
                 # ================================
                 # 等待用户手动确认（扫码后按 Enter）
                 # ================================
-                # 使用单独线程等待 input，不阻塞事件循环
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, input)
 
@@ -92,7 +122,31 @@ class AuthManager:
                     return False
 
             except Exception as e:
+                error_msg = str(e)
+                # 如果主 URL 连接被拒，尝试备选 URL
+                if "ERR_CONNECTION_CLOSED" in error_msg or "ERR_CONNECTION_REFUSED" in error_msg:
+                    fallbacks = self._fallback_urls(platform)
+                    for fb_url in fallbacks:
+                        try:
+                            print(f"🔁 连接被拒，尝试备选地址: {fb_url}")
+                            await page.goto(fb_url, wait_until="domcontentloaded", timeout=30000)
+                            print("✅ 备选地址可访问")
+                            # 成功访问，继续等待用户扫码
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(None, input)
+                            cookies = await context.cookies()
+                            if len(cookies) > 0:
+                                await self._save_cookies(platform, cookies)
+                                print(f"\n✅ {platform} 登录成功！")
+                                return True
+                            else:
+                                print(f"\n❌ {platform} 未检测到 cookie，登录可能失败")
+                                return False
+                        except Exception as fb_e:
+                            print(f"  ❌ 备选也失败: {fb_e}")
                 print(f"\n❌ {platform} 登录失败: {e}")
+                print(f"💡 提示: {platform} 可能暂时屏蔽了自动化浏览器")
+                print(f"   请尝试用普通浏览器打开 {login_url} 确认页面可达")
                 return False
             finally:
                 await page.close()

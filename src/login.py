@@ -20,7 +20,7 @@ from src.auth import AuthManager
 # ================================
 # 登录流程
 # ================================
-async def login_platform(platform: str) -> bool:
+async def login_platform(platform: str, fail_fast: bool = False) -> bool:
     """登录指定平台。"""
     print(f"\n{'='*40}")
     print(f"  平台: {platform}")
@@ -35,7 +35,12 @@ async def login_platform(platform: str) -> bool:
         print(f"\n📊 已保存 {count} 条 cookie")
         print("✅ 你现在可以运行 daemon.py 启动自动化监控了")
     else:
-        print("\n💡 提示: 可以重试，或检查网络环境后再次尝试")
+        print(f"\n💡 提示: 可以重试，或检查网络环境后再次尝试")
+        if platform in ("taobao", "pdd"):
+            print(f"   {platform} 对自动化浏览器限制较严，可能的解决方案：")
+            print(f"   1. 多试几次（有时偶发性成功）")
+            print(f"   2. 用手动浏览器打开登录页面，手动复制 cookie 到 cookies/{platform}.json")
+            print(f"   3. 如有系统 Chrome，可尝试用 --chrome 参数")
 
     return success
 
