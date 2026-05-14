@@ -118,6 +118,16 @@ def get_stealth_context_kwargs() -> dict:
     }
 
 
+def get_persistent_context_kwargs(
+    headless: bool = True,
+    use_system_chrome: bool = False,
+) -> dict:
+    """Return chromium.launch_persistent_context() kwargs."""
+    kwargs = get_stealth_launch_args(headless, use_system_chrome)
+    kwargs.update(get_stealth_context_kwargs())
+    return kwargs
+
+
 async def apply_stealth_to_page(page) -> None:
     """对已创建的 page 应用 init scripts。"""
     for script in INIT_SCRIPTS:
@@ -189,3 +199,40 @@ async def create_stealth_context(
             pass
 
     return context
+
+
+# ================================
+# 人类行为模拟
+# ================================
+import asyncio
+import random
+
+JD_WARMUP_URL = "https://m.jd.com"
+
+
+class HumanBehavior:
+    """模拟人类操作行为，降低风控触发率。"""
+
+    @staticmethod
+    async def random_delay(min_ms: int, max_ms: int) -> None:
+        await asyncio.sleep(random.randint(min_ms, max_ms) / 1000.0)
+
+    @staticmethod
+    async def mouse_jitter(page, moves: int = 2) -> None:
+        for _ in range(moves):
+            await page.mouse.move(random.randint(120, 900), random.randint(120, 600))
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+
+    @staticmethod
+    async def scroll(page) -> None:
+        await page.evaluate(f"window.scrollBy(0, {random.randint(120, 480)})")
+        await asyncio.sleep(random.uniform(0.4, 1.2))
+
+    @staticmethod
+    async def warm_jd(page) -> None:
+        try:
+            await page.goto(JD_WARMUP_URL, wait_until="domcontentloaded", timeout=10000)
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+            await HumanBehavior.scroll(page)
+        except Exception:
+            pass

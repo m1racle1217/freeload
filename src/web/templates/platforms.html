@@ -99,12 +99,21 @@
         justify-content: flex-end;
     }
 
-    .platform-toggle {
+    .platform-toggle,
+    .platform-runner {
         min-width: 92px;
     }
 
-    .platform-runner {
-        min-width: 92px;
+    .panel-actions {
+        margin-top: 0.9rem;
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .btn[disabled] {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 </style>
 {% endblock %}
@@ -113,11 +122,24 @@
 <section class="panel" style="padding: 1.2rem 1.3rem; margin-bottom: 1rem;">
     <strong>平台与登录状态</strong>
     <p style="margin: 0.45rem 0 0; color: var(--text-secondary); line-height: 1.6;">
-        管理各平台的登录、轮询频率和当前监控状态。
+        在这里管理各平台的登录、轮询间隔和监控启停状态。
     </p>
     <p style="margin: 0.45rem 0 0; color: var(--text-secondary); line-height: 1.6;">
-        当前只有京东具备部分自动执行链路；淘宝和拼多多默认关闭，因为目前仅支持活动入口巡检。
+        当前京东支持部分真实动作链路；淘宝和拼多多默认更偏向活动入口巡检。
     </p>
+    <div class="panel-actions">
+        <button
+            type="button"
+            class="btn btn-primary"
+            id="runtime-toggle"
+            data-enabled="{{ 'true' if daemon.get_executor().status_info().get('running') else 'false' }}"
+        >
+            {{ '停止全部' if daemon.get_executor().status_info().get('running') else '启动全部' }}
+        </button>
+        <span style="color: var(--text-secondary); font-size: 0.9rem;">
+            {{ '自动化运行中' if daemon.get_executor().status_info().get('running') else '自动化已暂停' }}
+        </span>
+    </div>
 </section>
 
 <div class="platform-grid">
@@ -164,8 +186,22 @@
                 {{ '停止' if watcher_state.get('enabled', cfg.get('enabled', True)) else '启动' }}
             </button>
             {% if key == 'jd' %}
-            <button type="button" class="btn platform-runner" data-platform-run="{{ key }}" data-action="sign_in">签到</button>
-            <button type="button" class="btn platform-runner" data-platform-run="{{ key }}" data-action="coupon">领券</button>
+            {% set sign_in_action = (login_state.get('available_actions') or {}).get('sign_in', {}) %}
+            {% set coupon_action = (login_state.get('available_actions') or {}).get('coupon', {}) %}
+            <button
+                type="button"
+                class="btn platform-runner"
+                data-platform-run="{{ key }}"
+                data-action="sign_in"
+                {% if not sign_in_action.get('available', false) %}disabled title="{{ sign_in_action.get('reason', '') }}"{% endif %}
+            >签到</button>
+            <button
+                type="button"
+                class="btn platform-runner"
+                data-platform-run="{{ key }}"
+                data-action="coupon"
+                {% if not coupon_action.get('available', false) %}disabled title="{{ coupon_action.get('reason', '') }}"{% endif %}
+            >领券</button>
             {% endif %}
             {% if logged_in %}
             <span class="btn" style="opacity: 0.7; cursor: default;">{{ '已验证' if login_state.get('verified') else '需补登' }}</span>
@@ -193,10 +229,7 @@
             {% set status = watcher.status_info() %}
             <tr>
                 <td><span class="platform-badge {{ watcher.platform }}">{{ watcher.platform }}</span></td>
-                <td>
-                    <span class="status-dot {{ 'green' if status.enabled else 'yellow' }}"></span>
-                    {{ '运行中' if status.enabled else '已禁用' }}
-                </td>
+                <td>{{ '运行中' if status.enabled else '已禁用' }}</td>
                 <td>{{ status.scan_count }}</td>
                 <td>{{ status.error_count }}</td>
             </tr>
@@ -211,6 +244,37 @@
 
 <script>
     document.addEventListener("DOMContentLoaded", function() {
+        var runtimeToggle = document.getElementById("runtime-toggle");
+        if (runtimeToggle) {
+            runtimeToggle.addEventListener("click", function() {
+                var enabled = runtimeToggle.dataset.enabled === "true";
+                runtimeToggle.disabled = true;
+                runtimeToggle.textContent = enabled ? "停止中..." : "启动中...";
+
+                fetch("/api/runtime/enabled", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: !enabled })
+                })
+                    .then(function(response) {
+                        return response.json().then(function(data) {
+                            return { status: response.status, body: data };
+                        });
+                    })
+                    .then(function(result) {
+                        if (result.status >= 400 || !result.body.ok) {
+                            throw new Error(result.body.error || "更新失败");
+                        }
+                        window.location.reload();
+                    })
+                    .catch(function(error) {
+                        runtimeToggle.disabled = false;
+                        runtimeToggle.textContent = enabled ? "停止全部" : "启动全部";
+                        alert(error.message || error);
+                    });
+            });
+        }
+
         Array.from(document.querySelectorAll("[data-platform-toggle]")).forEach(function(button) {
             button.addEventListener("click", function() {
                 var platform = button.dataset.platformToggle;

@@ -6,6 +6,12 @@ from unittest.mock import patch
 
 from src import auth as auth_module
 from src.auth import AuthManager
+from src.platforms import (
+    JD_MANUAL_ACTION_SPECS,
+    PLATFORM_DISPLAY_NAMES,
+    PLATFORM_LOGIN_URLS,
+    PLATFORM_WEB_LOGIN_FALLBACKS,
+)
 
 
 class AuthSessionCookieTests(unittest.TestCase):
@@ -93,6 +99,31 @@ class AuthSessionCookieTests(unittest.TestCase):
 
         self.assertFalse(AuthManager.is_login_confirmed("taobao", cookies))
 
+    def test_login_urls_are_provided_by_platform_registry(self):
+        self.assertEqual(
+            AuthManager._platform_domain("jd"),
+            PLATFORM_LOGIN_URLS["jd"],
+        )
+        self.assertEqual(
+            AuthManager._platform_domain("taobao"),
+            PLATFORM_LOGIN_URLS["taobao"],
+        )
+
+    def test_login_fallbacks_are_provided_by_platform_registry(self):
+        self.assertEqual(
+            AuthManager._fallback_urls("taobao"),
+            PLATFORM_WEB_LOGIN_FALLBACKS["taobao"],
+        )
+        self.assertEqual(
+            AuthManager._fallback_urls("pdd"),
+            PLATFORM_WEB_LOGIN_FALLBACKS["pdd"],
+        )
+
+    def test_platform_registry_exposes_manual_jd_actions(self):
+        self.assertEqual(PLATFORM_DISPLAY_NAMES["jd"], "京东")
+        self.assertEqual(JD_MANUAL_ACTION_SPECS["sign_in"]["event_type"], "sign_in")
+        self.assertEqual(JD_MANUAL_ACTION_SPECS["coupon"]["event_type"], "coupon")
+
 
 class AuthSavedSessionTests(unittest.IsolatedAsyncioTestCase):
     def cookie(self, name, value="value"):
@@ -144,3 +175,52 @@ class AuthSavedSessionTests(unittest.IsolatedAsyncioTestCase):
                 state = await AuthManager().get_saved_session_state("jd")
                 self.assertFalse(state["logged_in"])
                 self.assertEqual(state["label"], "待验证")
+
+    async def test_verified_jd_web_session_exposes_action_capabilities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "cookies": [self.cookie("thor"), self.cookie("pin")],
+                "metadata": {"login_verified": True, "page_url": "https://home.jd.com/"},
+            }
+            (tmp_path / "jd.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch.object(auth_module, "COOKIE_DIR", tmp_path):
+                state = await AuthManager().get_saved_session_state("jd")
+                self.assertTrue(state["logged_in"])
+                self.assertFalse(state["capabilities"]["mobile_sign"])
+                self.assertTrue(state["available_actions"]["coupon"]["available"])
+                self.assertFalse(state["available_actions"]["sign_in"]["available"])
+
+    async def test_persistent_jd_profile_unlocks_sign_in_without_mobile_cookie_pair(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            profile_path = Path(tmp) / "profiles" / "jd"
+            profile_path.mkdir(parents=True, exist_ok=True)
+            (profile_path / "Preferences").write_text("{}", encoding="utf-8")
+            payload = {
+                "cookies": [self.cookie("thor"), self.cookie("pin")],
+                "metadata": {"login_verified": True, "page_url": "https://home.jd.com/"},
+            }
+            (tmp_path / "jd.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch.object(auth_module, "COOKIE_DIR", tmp_path), patch.object(
+                auth_module, "PROFILE_DIR", Path(tmp) / "profiles"
+            ):
+                state = await AuthManager().get_saved_session_state("jd")
+                self.assertTrue(state["logged_in"])
+                self.assertTrue(state["available_actions"]["sign_in"]["available"])
+
+    async def test_mobile_sign_session_unlocks_jd_sign_in_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload = {
+                "cookies": [self.cookie("pt_key"), self.cookie("pt_pin")],
+                "metadata": {"login_verified": True, "page_url": "https://home.jd.com/"},
+            }
+            (tmp_path / "jd.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch.object(auth_module, "COOKIE_DIR", tmp_path):
+                state = await AuthManager().get_saved_session_state("jd")
+                self.assertTrue(state["capabilities"]["mobile_sign"])
+                self.assertTrue(state["available_actions"]["sign_in"]["available"])

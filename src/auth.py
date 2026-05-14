@@ -11,47 +11,20 @@ from typing import Optional
 
 from playwright.async_api import async_playwright, BrowserContext
 
+from src.platforms import (
+    JD_MANUAL_ACTION_SPECS,
+    PLATFORM_LOGIN_URLS,
+    PLATFORM_WEB_LOGIN_FALLBACKS,
+    SESSION_COOKIE_RULES,
+    STRICT_PAGE_VERIFICATION_PLATFORMS,
+)
+
 
 # ================================
 # 路径常量
 # ================================
 COOKIE_DIR = Path(__file__).resolve().parent.parent / "cookies"
-STRICT_PAGE_VERIFICATION_PLATFORMS = {"jd", "taobao"}
-
-
-SESSION_COOKIE_RULES = {
-    "jd": {
-        "web": [
-            {"pt_key", "pt_pin"},
-            {"thor", "pin"},
-            {"thor", "unick"},
-        ],
-        "mobile_sign": [
-            {"pt_key", "pt_pin"},
-        ],
-    },
-    "taobao": {
-        "web": [
-            {"_tb_token_", "cookie2"},
-            {"unb", "cookie2"},
-            {"lgc", "tracknick"},
-        ],
-    },
-    "pdd": {
-        "web": [
-            {"pdd_user_id"},
-            {"PDDAccessToken"},
-            {"api_uid", "pdd_user_uin"},
-        ],
-    },
-    "miniapp": {
-        "web": [
-            {"session"},
-            {"token"},
-            {"sessionid"},
-        ],
-    },
-}
+PROFILE_DIR = Path(__file__).resolve().parent.parent / "profiles"
 
 
 # ================================
@@ -67,35 +40,28 @@ class AuthManager:
     @staticmethod
     def _platform_domain(platform: str) -> str:
         """返回各平台的登录页域名。"""
-        domains = {
-            "jd": "https://passport.jd.com/new/login.aspx",
-            "taobao": "https://login.taobao.com/member/login.jhtml",
-            "pdd": "https://mobile.yangkeduo.com/login.html",
-            "miniapp": "https://open.weixin.qq.com/connect/qrconnect",
-        }
-        return domains.get(platform, f"https://{platform}.com")
+        return PLATFORM_LOGIN_URLS.get(platform, f"https://{platform}.com")
 
     @staticmethod
     def _fallback_urls(platform: str) -> list[str]:
         """返回各平台备选登录 URL。"""
-        fallbacks = {
-            "taobao": [
-                "https://login.taobao.com/",
-                "https://login.m.taobao.com/login.htm",
-                "https://www.taobao.com/",
-            ],
-            "pdd": [
-                "https://www.pinduoduo.com/",
-                "https://mobile.yangkeduo.com/",
-            ],
-        }
-        return fallbacks.get(platform, [])
+        return PLATFORM_WEB_LOGIN_FALLBACKS.get(platform, [])
 
     @staticmethod
     def _cookie_path(platform: str) -> Path:
         """返回 cookie 文件路径。"""
         COOKIE_DIR.mkdir(parents=True, exist_ok=True)
         return COOKIE_DIR / f"{platform}.json"
+
+    @staticmethod
+    def persistent_profile_dir(platform: str) -> Path:
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        return PROFILE_DIR / platform
+
+    @classmethod
+    def has_persistent_profile(cls, platform: str) -> bool:
+        profile_dir = cls.persistent_profile_dir(platform)
+        return profile_dir.exists() and any(profile_dir.iterdir())
 
     @staticmethod
     def cli_login_commands(platform: str) -> dict[str, str]:
@@ -143,9 +109,7 @@ class AuthManager:
         2. 全部 URL 都被拦截时，尝试用系统 Chrome/Edge（TLS 指纹不同）
         3. 给出手动导入 cookie 的提示
         """
-        from src.stealth import (
-            create_stealth_browser, create_stealth_context, _detect_available_channel,
-        )
+        from src.stealth import _detect_available_channel, get_persistent_context_kwargs
 
         login_url = self._platform_domain(platform)
         fallbacks = self._fallback_urls(platform)
@@ -169,10 +133,15 @@ class AuthManager:
                 mode = f"Playwright Chromium" if not use_system else f"系统 {system_channel}"
                 print(f"\n--- 尝试方式: {mode} ---")
 
-                browser = await create_stealth_browser(
-                    p, headless=False, use_system_chrome=use_system,
+                profile_dir = self.persistent_profile_dir(platform)
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                context = await p.chromium.launch_persistent_context(
+                    str(profile_dir),
+                    **get_persistent_context_kwargs(
+                        headless=False,
+                        use_system_chrome=use_system,
+                    ),
                 )
-                context = await create_stealth_context(browser)
                 page = await context.new_page()
 
                 for idx, url in enumerate(urls_to_try):
@@ -194,9 +163,7 @@ class AuthManager:
                             print(f"  ❌ 备选失败: {e}")
                         continue
 
-                await page.close()
                 await context.close()
-                await browser.close()
 
                 # 如果内置 Chromium 失败且系统浏览器可用，自动重试
                 if attempt == 1 and system_channel:
@@ -265,7 +232,9 @@ class AuthManager:
         """Return a nuanced saved-session state for UI/logging decisions."""
         cookies = await self.load_cookies(platform)
         metadata = await self.load_session_metadata(platform)
+        has_profile = self.has_persistent_profile(platform)
         commands = self.cli_login_commands(platform)
+        capabilities = self._saved_capabilities(platform, cookies or [], metadata)
         default = {
             "platform": platform,
             "logged_in": False,
@@ -275,6 +244,8 @@ class AuthManager:
             "detail": self.cli_login_hint(platform),
             "login_command": commands["repo_root"],
             "login_commands": commands,
+            "capabilities": capabilities,
+            "available_actions": self._available_actions(platform, capabilities),
         }
         if not cookies:
             return default
@@ -289,8 +260,19 @@ class AuthManager:
                     **default,
                     "logged_in": True,
                     "verified": True,
-                    "label": "可自动执行",
-                    "detail": "已具备 pt_key/pt_pin，可执行京东签到等移动任务",
+                    "label": "移动会话",
+                    "detail": "已具备 pt_key/pt_pin，可执行京东签到等移动端动作",
+                }
+            if verified and has_web and has_profile:
+                capabilities["mobile_sign"] = True
+                return {
+                    **default,
+                    "logged_in": True,
+                    "verified": True,
+                    "capabilities": capabilities,
+                    "available_actions": self._available_actions(platform, capabilities),
+                    "label": "持久会话",
+                    "detail": "已存在京东持久浏览器会话，可直接尝试签到、领券等真实页面动作",
                 }
             if verified and has_web:
                 return {
@@ -298,19 +280,20 @@ class AuthManager:
                     "logged_in": True,
                     "verified": True,
                     "label": "仅网页态",
-                    "detail": "已验证网页登录，但缺少 pt_key/pt_pin，无法自动签到",
+                    "detail": "已验证网页登录，但缺少 pt_key/pt_pin，暂时无法执行移动签到",
                 }
             if has_web:
                 return {
                     **default,
                     "label": "待验证",
-                    "detail": "检测到旧京东网页登录 cookie，但尚未验证真实可用性，请重新登录一次",
+                    "detail": "检测到网页登录 cookie，但尚未确认是否为真实有效登录态",
                 }
             return {
                 **default,
                 "label": "无效 cookie",
-                "detail": "检测到京东 cookie，但不满足登录要求，请重新登录",
+                "detail": "检测到 cookie，但尚未形成可用的京东登录态",
             }
+
 
         if platform in STRICT_PAGE_VERIFICATION_PLATFORMS:
             if verified and has_web:
@@ -354,6 +337,34 @@ class AuthManager:
         if not cookies:
             return False
         return self.has_required_cookie_group(cookies, platform, capability)
+
+    @staticmethod
+    def _saved_capabilities(platform: str, cookies: list[dict], metadata: dict) -> dict[str, bool]:
+        verified = metadata.get("login_verified") is True
+        has_web = AuthManager._has_session_cookie(cookies, platform)
+        capabilities = {"web": bool(verified and has_web)}
+        for capability in SESSION_COOKIE_RULES.get(platform, {}):
+            capabilities[capability] = AuthManager.has_required_cookie_group(
+                cookies, platform, capability
+            )
+        if platform == "jd":
+            capabilities["web"] = bool(verified and has_web)
+        return capabilities
+
+    @staticmethod
+    def _available_actions(platform: str, capabilities: dict[str, bool]) -> dict[str, dict[str, object]]:
+        if platform != "jd":
+            return {}
+        actions: dict[str, dict[str, object]] = {}
+        for action, spec in JD_MANUAL_ACTION_SPECS.items():
+            required = str(spec.get("required_capability", "")).strip()
+            available = bool(capabilities.get(required)) if required else True
+            actions[action] = {
+                "available": available,
+                "reason": "" if available else spec.get("unavailable_reason", ""),
+                "required_capability": required,
+            }
+        return actions
 
     async def inject_cookies(self, context: BrowserContext, platform: str) -> bool:
         """向浏览器上下文注入 cookie。返回是否成功。"""

@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
-"""通知基类 — 通知渠道的通用抽象。"""
+"""Shared notification abstractions."""
 
-# ================================
-# 导入依赖
-# ================================
 from abc import ABC, abstractmethod
 from typing import Optional
 
 
-# ================================
-# 通知消息
-# ================================
 class NotifyMessage:
-    """通知消息体。"""
+    """Notification payload passed to notifier backends."""
 
     def __init__(
         self,
@@ -23,17 +17,14 @@ class NotifyMessage:
     ):
         self.subject = subject
         self.body = body
-        self.level = level        # info / warning / success / critical
+        self.level = level
         self.event_type = event_type
 
 
-# ================================
-# 通知器基类
-# ================================
 class BaseNotifier(ABC):
-    """通知器基类，所有通知渠道继承此类。"""
+    """Base class for all notification channels."""
 
     @abstractmethod
     async def send(self, message: NotifyMessage) -> bool:
-        """发送通知，返回是否成功。"""
+        """Send a notification and report whether it succeeded."""
         ...

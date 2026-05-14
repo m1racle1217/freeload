@@ -70,6 +70,44 @@ class Daemon:
         self._running = False
         self._actual_web_port = None
 
+    def _create_watcher_for_platform(self, platform: str):
+        """Create a watcher instance for a supported platform from current config."""
+        from src.watchers.jd_watcher import JDWatcher
+        from src.watchers.marketplace_watcher import MarketplaceActivityWatcher
+
+        if platform == "jd":
+            interval = self.config.get("platforms", "jd", "poll_interval", default=30)
+            watcher = JDWatcher(
+                self.event_queue,
+                poll_interval=interval,
+                browser_pool=self.browser_pool,
+            )
+            watcher._config = self.config  # type: ignore[attr-defined]
+            return watcher
+
+        if platform in ("taobao", "pdd"):
+            interval = self.config.get("platforms", platform, "poll_interval", default=60)
+            threshold = self.config.get("platforms", platform, "value_threshold", default=1.0)
+            return MarketplaceActivityWatcher(
+                platform,
+                self.event_queue,
+                poll_interval=interval,
+                browser_pool=self.browser_pool,
+                value_threshold=threshold,
+            )
+
+        return None
+
+    def _register_watcher_instance(self, watcher) -> None:
+        """Track and start a watcher instance exactly once."""
+        existing = self._watchers_by_platform.get(watcher.platform)
+        if existing is watcher:
+            return
+        if existing is None:
+            self._watchers.append(watcher)
+        self._watchers_by_platform[watcher.platform] = watcher
+        asyncio.create_task(watcher.run())
+
     async def start(self) -> None:
         """Start all managed services."""
         print(f"\n{'=' * 50}")
@@ -91,7 +129,7 @@ class Daemon:
         web_port = self.config.get("web", "port", default=9528)
         print(f"\n{'=' * 50}")
         print("  守护进程已启动")
-        if hasattr(self, "_actual_web_port") and self._actual_web_port != web_port:
+        if self._actual_web_port != web_port:
             print(
                 f"  Web 面板: http://{web_host}:{self._actual_web_port} "
                 f"(配置端口 {web_port} 已被占用)"
@@ -133,38 +171,20 @@ class Daemon:
 
     async def _register_watchers(self) -> None:
         """Start enabled platform watchers from config."""
-        from src.watchers.jd_watcher import JDWatcher
-        from src.watchers.marketplace_watcher import MarketplaceActivityWatcher
-
-        jd_enabled = self.config.get("platforms", "jd", "enabled", default=True)
-        jd_interval = self.config.get("platforms", "jd", "poll_interval", default=30)
-        if jd_enabled:
-            watcher = JDWatcher(
-                self.event_queue,
-                poll_interval=jd_interval,
-                browser_pool=self.browser_pool,
-            )
-            self._watchers.append(watcher)
-            self._watchers_by_platform["jd"] = watcher
-            asyncio.create_task(watcher.run())
-            logger.info("[Watcher] 京东监控器已注册 (间隔 %ds)", jd_interval)
-
-        for platform, label in (("taobao", "淘宝"), ("pdd", "拼多多")):
+        labels = {"jd": "京东", "taobao": "淘宝", "pdd": "拼多多"}
+        for platform in ("jd", "taobao", "pdd"):
             enabled = self.config.get("platforms", platform, "enabled", default=True)
-            interval = self.config.get("platforms", platform, "poll_interval", default=60)
-            threshold = self.config.get("platforms", platform, "value_threshold", default=1.0)
-            if enabled:
-                watcher = MarketplaceActivityWatcher(
-                    platform,
-                    self.event_queue,
-                    poll_interval=interval,
-                    browser_pool=self.browser_pool,
-                    value_threshold=threshold,
-                )
-                self._watchers.append(watcher)
-                self._watchers_by_platform[platform] = watcher
-                asyncio.create_task(watcher.run())
-                logger.info("[Watcher] %s活动巡检器已注册 (间隔 %ds)", label, interval)
+            if not enabled or self.get_watcher(platform) is not None:
+                continue
+            watcher = self._create_watcher_for_platform(platform)
+            if watcher is None:
+                continue
+            self._register_watcher_instance(watcher)
+            logger.info(
+                "[Watcher] %s监控器已注册 (间隔 %ds)",
+                labels.get(platform, platform),
+                watcher.poll_interval,
+            )
 
         logger.info("共注册 %d 个 Watcher", len(self._watchers))
 
@@ -177,9 +197,14 @@ class Daemon:
             MarketplaceActivityHandler,
         )
 
-        self.executor.register_handler("jd:sign_in", JDSignInHandler(self.browser_pool))
-        self.executor.register_handler("jd:flash_sale", JDFlashSaleHandler(self.browser_pool))
-        self.executor.register_handler("jd:coupon", JDCouponHandler(self.browser_pool))
+        def _wire(handler):
+            handler._config = self.config
+            handler._notifier = self.notifier
+            return handler
+
+        self.executor.register_handler("jd:sign_in", _wire(JDSignInHandler(self.browser_pool)))
+        self.executor.register_handler("jd:flash_sale", _wire(JDFlashSaleHandler(self.browser_pool)))
+        self.executor.register_handler("jd:coupon", _wire(JDCouponHandler(self.browser_pool)))
         self.executor.register_handler(
             "taobao:activity_check",
             MarketplaceActivityHandler(self.browser_pool),
@@ -188,7 +213,7 @@ class Daemon:
             "pdd:activity_check",
             MarketplaceActivityHandler(self.browser_pool),
         )
-        logger.info("[处理器] 平台任务处理器已注册 (京东任务 + 淘宝/拼多多活动巡检)")
+        logger.info("[处理器] 平台任务处理器已注册（京东已注入限速/通知）")
 
     async def _start_web(self) -> None:
         """Start the FastAPI web service."""
@@ -282,7 +307,12 @@ class Daemon:
                 setattr(
                     watcher,
                     "_value_threshold",
-                    float(platform_cfg.get("value_threshold", getattr(watcher, "_value_threshold", 1.0))),
+                    float(
+                        platform_cfg.get(
+                            "value_threshold",
+                            getattr(watcher, "_value_threshold", 1.0),
+                        )
+                    ),
                 )
 
     async def set_platform_enabled(self, platform: str, enabled: bool) -> dict:
@@ -290,6 +320,11 @@ class Daemon:
         self.config.update_platform_enabled(platform, enabled)
         self.reload_config()
         watcher = self.get_watcher(platform)
+        if bool(enabled) and watcher is None:
+            watcher = self._create_watcher_for_platform(platform)
+            if watcher is not None:
+                self._register_watcher_instance(watcher)
+
         state = {
             "platform": platform,
             "enabled": bool(enabled),
@@ -299,6 +334,36 @@ class Daemon:
             watcher.set_enabled(bool(enabled))
             state["status"] = watcher.status_info()
         return state
+
+    async def set_runtime_enabled(self, enabled: bool) -> dict:
+        """Pause or resume the automation runtime without stopping the web panel."""
+        runtime_enabled = bool(enabled)
+        if runtime_enabled and not self.executor.status_info().get("running", False):
+            self.executor._running = True
+            asyncio.create_task(self.executor.run())
+        else:
+            self.executor._running = runtime_enabled
+
+        if runtime_enabled:
+            for platform in ("jd", "taobao", "pdd"):
+                platform_enabled = bool(
+                    self.config.get("platforms", platform, "enabled", default=True)
+                )
+                if platform_enabled and self.get_watcher(platform) is None:
+                    watcher = self._create_watcher_for_platform(platform)
+                    if watcher is not None:
+                        self._register_watcher_instance(watcher)
+
+        for watcher in self._watchers:
+            platform_enabled = bool(
+                self.config.get("platforms", watcher.platform, "enabled", default=True)
+            )
+            watcher.set_enabled(runtime_enabled and platform_enabled)
+        return {
+            "enabled": runtime_enabled,
+            "executor_running": self.executor.status_info().get("running", False),
+            "watchers": [watcher.status_info() for watcher in self._watchers],
+        }
 
 
 async def _auto_restart() -> None:

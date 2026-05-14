@@ -102,8 +102,7 @@ class BaseWatcher(ABC):
     # ================================
     async def ensure_login(self, auth: AuthManager) -> bool:
         """确保平台已登录，返回是否已登录。"""
-        cookies = await auth.load_cookies(self.platform)
-        return cookies is not None and len(cookies) > 0
+        return await auth.has_saved_session(self.platform)
 
     # ================================
     # 状态报告

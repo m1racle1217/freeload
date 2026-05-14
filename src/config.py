@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from src.platforms import PLATFORM_DEFAULT_CONFIG
+
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -28,12 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "to_addr": "",
         }
     },
-    "platforms": {
-        "jd": {"enabled": True, "poll_interval": 30, "value_threshold": 1.0},
-        "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
-        "pdd": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
-        "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
-    },
+    "platforms": copy.deepcopy(PLATFORM_DEFAULT_CONFIG),
     "web": {"host": "127.0.0.1", "port": 9528},
     "browser": {"pool_size": 2, "headless": False},
 }
@@ -140,12 +137,20 @@ class Config:
         }
 
     def update_platform_enabled(self, platform: str, enabled: bool) -> dict[str, Any]:
-        """Persist a single platform enabled flag and reload config."""
+        """Persist a single platform enabled flag without revalidating unrelated email fields."""
         if platform not in DEFAULT_CONFIG["platforms"]:
             raise ValueError(f"unknown platform: {platform}")
-        payload = self.to_save_payload()
-        payload["platforms"][platform]["enabled"] = bool(enabled)
-        return self.save_update(payload)
+        with open(self._path, encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle) or {}
+        normalized = self._merge_defaults(loaded)
+        normalized.setdefault("platforms", {}).setdefault(platform, {})
+        normalized["platforms"][platform]["enabled"] = bool(enabled)
+        temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(normalized, handle, allow_unicode=True, sort_keys=False)
+        temp_path.replace(self._path)
+        self.load()
+        return normalized
 
     def validate_update(self, incoming: dict[str, Any]) -> dict[str, Any]:
         """Normalize and validate a config update payload."""
@@ -196,11 +201,22 @@ class Config:
                 raise ValueError(f"{platform}.poll_interval must be positive")
             if value_threshold < 0:
                 raise ValueError(f"{platform}.value_threshold must be non-negative")
-            normalized["platforms"][platform] = {
+            normalized_platform = {
                 "enabled": bool(platform_data["enabled"]),
                 "poll_interval": poll_interval,
                 "value_threshold": value_threshold,
             }
+            if platform == "jd":
+                targets = []
+                for raw in platform_data.get("flash_sale_targets", []) or []:
+                    url = str(raw.get("url", "")).strip()
+                    if not url:
+                        continue
+                    title = str(raw.get("title", "")).strip() or "京东目标商品"
+                    value = float(raw.get("value", 10.0) or 10.0)
+                    targets.append({"title": title, "url": url, "value": value})
+                normalized_platform["flash_sale_targets"] = targets
+            normalized["platforms"][platform] = normalized_platform
 
         if not normalized["web"]["host"]:
             raise ValueError("web.host is required")

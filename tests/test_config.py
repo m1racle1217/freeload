@@ -25,7 +25,12 @@ class ConfigEditorTests(unittest.TestCase):
                         }
                     },
                     "platforms": {
-                        "jd": {"enabled": True, "poll_interval": 30, "value_threshold": 1.0},
+                        "jd": {
+                            "enabled": True,
+                            "poll_interval": 30,
+                            "value_threshold": 1.0,
+                            "flash_sale_targets": [],
+                        },
                         "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
                         "pdd": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
                         "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
@@ -77,7 +82,14 @@ class ConfigEditorTests(unittest.TestCase):
                         }
                     },
                     "platforms": {
-                        "jd": {"enabled": True, "poll_interval": 45, "value_threshold": 2.5},
+                        "jd": {
+                            "enabled": True,
+                            "poll_interval": 45,
+                            "value_threshold": 2.5,
+                            "flash_sale_targets": [
+                                {"title": "iPhone", "url": "https://item.jd.com/123.html", "value": 99}
+                            ],
+                        },
                         "taobao": {"enabled": False, "poll_interval": 60, "value_threshold": 1.0},
                         "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
                         "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
@@ -90,6 +102,10 @@ class ConfigEditorTests(unittest.TestCase):
             self.assertEqual(normalized["notify"]["email"]["password"], "secret-token")
             self.assertEqual(normalized["notify"]["email"]["smtp_port"], 587)
             self.assertFalse(normalized["notify"]["email"]["use_ssl"])
+            self.assertEqual(
+                normalized["platforms"]["jd"]["flash_sale_targets"][0]["url"],
+                "https://item.jd.com/123.html",
+            )
 
     def test_validate_update_rejects_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,11 +126,16 @@ class ConfigEditorTests(unittest.TestCase):
                                 "to_addr": "target@example.com",
                             }
                         },
-                        "platforms": {
-                            "jd": {"enabled": True, "poll_interval": 0, "value_threshold": -1},
-                            "taobao": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
-                            "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
-                            "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
+                    "platforms": {
+                        "jd": {
+                            "enabled": True,
+                            "poll_interval": 0,
+                            "value_threshold": -1,
+                            "flash_sale_targets": [],
+                        },
+                        "taobao": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
+                        "pdd": {"enabled": True, "poll_interval": 60, "value_threshold": 1.0},
+                        "miniapp": {"enabled": True, "poll_interval": 300, "value_threshold": 0.5},
                         },
                         "web": {"host": "127.0.0.1", "port": 9528},
                         "browser": {"pool_size": 0, "headless": False},
@@ -140,7 +161,14 @@ class ConfigEditorTests(unittest.TestCase):
                         }
                     },
                     "platforms": {
-                        "jd": {"enabled": False, "poll_interval": 35, "value_threshold": 1.5},
+                        "jd": {
+                            "enabled": False,
+                            "poll_interval": 35,
+                            "value_threshold": 1.5,
+                            "flash_sale_targets": [
+                                {"title": "茅台", "url": "https://item.jd.com/999.html", "value": 300}
+                            ],
+                        },
                         "taobao": {"enabled": True, "poll_interval": 61, "value_threshold": 1.0},
                         "pdd": {"enabled": True, "poll_interval": 62, "value_threshold": 1.0},
                         "miniapp": {"enabled": True, "poll_interval": 301, "value_threshold": 0.8},
@@ -154,4 +182,28 @@ class ConfigEditorTests(unittest.TestCase):
             self.assertEqual(stored["notify"]["email"]["password"], "new-secret")
             self.assertEqual(stored["web"]["port"], 9530)
             self.assertFalse(stored["platforms"]["jd"]["enabled"])
+            self.assertEqual(
+                stored["platforms"]["jd"]["flash_sale_targets"][0]["url"],
+                "https://item.jd.com/999.html",
+            )
             self.assertEqual(config.get("browser", "pool_size"), 4)
+
+    def test_update_platform_enabled_does_not_require_email_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.make_config_file(tmp)
+            stored = yaml.safe_load(path.read_text(encoding="utf-8"))
+            stored["notify"]["email"]["to_addr"] = ""
+            stored["notify"]["email"]["from_addr"] = ""
+            path.write_text(
+                yaml.safe_dump(stored, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+
+            config = Config(path)
+            config.load()
+
+            updated = config.update_platform_enabled("taobao", True)
+
+            self.assertTrue(updated["platforms"]["taobao"]["enabled"])
+            persisted = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertTrue(persisted["platforms"]["taobao"]["enabled"])

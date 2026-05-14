@@ -23,10 +23,15 @@ class DummyStorage:
 
 
 class DummyExecutor:
+    def __init__(self):
+        self._running = True
+        self.last_event = None
+
     def status_info(self):
-        return {"processed": 0, "success": 0, "recent": []}
+        return {"running": self._running, "processed": 0, "success": 0, "recent": []}
 
     async def _execute_event(self, event):
+        self.last_event = event
         return {"success": True, "detail": f"executed:{event.event_type}", "value": event.value}
 
 
@@ -35,14 +40,27 @@ class DummyAuth:
         return False
 
     async def get_saved_session_state(self, platform):
-        return {
+        state = {
             "platform": platform,
             "logged_in": False,
             "verified": False,
             "label": "未登录",
             "detail": "请重新登录",
             "cookie_count": 0,
+            "capabilities": {},
+            "available_actions": {},
         }
+        if platform == "jd":
+            state["logged_in"] = True
+            state["verified"] = True
+            state["label"] = "仅网页态"
+            state["detail"] = "已验证网页登录，但缺少 pt_key/pt_pin"
+            state["capabilities"] = {"web": True, "mobile_sign": False}
+            state["available_actions"] = {
+                "sign_in": {"available": False, "reason": "缺少 pt_key/pt_pin"},
+                "coupon": {"available": True, "reason": ""},
+            }
+        return state
 
     @staticmethod
     def _has_session_cookie(cookies, platform):
@@ -105,6 +123,7 @@ class DummyDaemon:
         self._running = True
         self.reload_count = 0
         self.platform_updates = []
+        self.runtime_updates = []
 
     def get_watchers(self):
         return []
@@ -122,6 +141,11 @@ class DummyDaemon:
     async def set_platform_enabled(self, platform, enabled):
         self.platform_updates.append((platform, enabled))
         return {"platform": platform, "enabled": enabled, "watcher_registered": False}
+
+    async def set_runtime_enabled(self, enabled):
+        self.runtime_updates.append(enabled)
+        self.executor._running = enabled
+        return {"enabled": enabled, "executor_running": enabled}
 
 
 class DummyLocator:
@@ -313,3 +337,67 @@ class ConfigApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.json()["ok"])
             self.assertEqual(response.json()["result"]["detail"], "executed:coupon")
+
+    def test_run_jd_flash_sale_endpoint_passes_target_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            client = TestClient(create_app(daemon))
+
+            response = client.post(
+                "/api/platforms/jd/run",
+                json={
+                    "action": "flash_sale",
+                    "url": "https://item.jd.com/123.html",
+                    "title": "指定商品秒杀",
+                    "value": 88.0,
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertEqual(daemon.executor.last_event.url, "https://item.jd.com/123.html")
+            self.assertEqual(daemon.executor.last_event.title, "指定商品秒杀")
+            self.assertEqual(daemon.executor.last_event.value, 88.0)
+
+    def test_run_jd_sign_in_endpoint_rejects_when_capability_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            client = TestClient(create_app(daemon))
+
+            response = client.post("/api/platforms/jd/run", json={"action": "sign_in"})
+
+            self.assertEqual(response.status_code, 409)
+            self.assertFalse(response.json()["ok"])
+            self.assertIn("pt_key/pt_pin", response.json()["error"])
+
+    def test_run_jd_sign_in_endpoint_allows_persistent_profile_state(self):
+        class PersistentDummyAuth(DummyAuth):
+            async def get_saved_session_state(self, platform):
+                state = await super().get_saved_session_state(platform)
+                if platform == "jd":
+                    state["label"] = "持久会话"
+                    state["detail"] = "已存在可复用浏览器持久会话"
+                    state["available_actions"]["sign_in"] = {"available": True, "reason": ""}
+                return state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            daemon.auth = PersistentDummyAuth()
+            client = TestClient(create_app(daemon))
+
+            response = client.post("/api/platforms/jd/run", json={"action": "sign_in"})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertEqual(response.json()["result"]["detail"], "executed:sign_in")
+
+    def test_set_runtime_enabled_endpoint_updates_daemon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            daemon = DummyDaemon(self.make_config_file(tmp))
+            client = TestClient(create_app(daemon))
+
+            response = client.post("/api/runtime/enabled", json={"enabled": False})
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertEqual(daemon.runtime_updates, [False])

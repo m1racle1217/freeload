@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from src.platforms import JD_MANUAL_ACTION_SPECS, PLATFORM_DISPLAY_NAMES
 
 logger = logging.getLogger("freeload")
 
@@ -25,6 +26,7 @@ PLATFORM_NAMES = {
     "pdd": "拼多多",
     "miniapp": "品牌小程序",
 }
+PLATFORM_NAMES = PLATFORM_DISPLAY_NAMES
 
 
 def _login_state_view(state: dict[str, object]) -> dict[str, object]:
@@ -141,22 +143,32 @@ def create_app(daemon) -> FastAPI:
         try:
             payload = await request.json()
             action = str(payload.get("action", "")).strip()
-            action_map = {
-                "sign_in": {"event_type": "sign_in", "title": "京东手动签到", "value": 2.0},
-                "coupon": {"event_type": "coupon", "title": "京东手动领券", "value": 1.0},
-            }
-            if action not in action_map:
+            if action not in JD_MANUAL_ACTION_SPECS:
                 return JSONResponse({"ok": False, "error": f"不支持的动作: {action}"}, status_code=422)
-            spec = action_map[action]
+            spec = JD_MANUAL_ACTION_SPECS[action]
+            session_state = await daemon.auth.get_saved_session_state(platform)
+            action_state = (session_state.get("available_actions") or {}).get(action, {})
+            if not action_state.get("available", True):
+                return JSONResponse(
+                    {"ok": False, "error": action_state.get("reason") or "当前动作不可执行"},
+                    status_code=409,
+                )
             from src.event import WoolEvent
 
             result = await daemon.get_executor()._execute_event(  # type: ignore[attr-defined]
                 WoolEvent(
                     platform="jd",
                     event_type=spec["event_type"],
-                    title=spec["title"],
-                    value=spec["value"],
+                    title=str(payload.get("title") or spec["title"]),
+                    value=float(payload.get("value") or spec["value"]),
                     urgency=7,
+                    url=str(payload.get("url") or ""),
+                    data={
+                        "purchase_url": str(payload.get("url") or ""),
+                        "item_url": str(payload.get("url") or ""),
+                    }
+                    if payload.get("url")
+                    else {},
                 )
             )
             return JSONResponse({"ok": True, "result": result})
@@ -181,6 +193,17 @@ def create_app(daemon) -> FastAPI:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
         except Exception as exc:
             logger.exception("updating platform enabled failed")
+            return JSONResponse({"ok": False, "error": f"更新失败: {exc}"}, status_code=500)
+
+    @app.post("/api/runtime/enabled")
+    async def api_set_runtime_enabled(request: Request):
+        try:
+            payload = await request.json()
+            enabled = bool(payload.get("enabled"))
+            state = await daemon.set_runtime_enabled(enabled)
+            return JSONResponse({"ok": True, "state": state})
+        except Exception as exc:
+            logger.exception("updating runtime enabled failed")
             return JSONResponse({"ok": False, "error": f"更新失败: {exc}"}, status_code=500)
 
     @app.post("/api/config")
@@ -258,23 +281,22 @@ def create_app(daemon) -> FastAPI:
         try:
             from playwright.async_api import async_playwright
 
-            from src.stealth import (
-                _detect_available_channel,
-                create_stealth_browser,
-                create_stealth_context,
-            )
+            from src.stealth import _detect_available_channel, get_persistent_context_kwargs
 
             playwright = await async_playwright().start()
             login_url = daemon.auth._platform_domain(platform)
             fallbacks = daemon.auth._fallback_urls(platform)
             urls_to_try = [login_url] + fallbacks
             use_system = platform in {"taobao", "pdd"} and bool(_detect_available_channel())
-            browser = await create_stealth_browser(
-                playwright,
-                headless=False,
-                use_system_chrome=use_system,
+            profile_dir = daemon.auth.persistent_profile_dir(platform)
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            context = await playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                **get_persistent_context_kwargs(
+                    headless=False,
+                    use_system_chrome=use_system,
+                ),
             )
-            context = await create_stealth_context(browser)
             page = await context.new_page()
             opened_url = login_url
             last_error = ""
@@ -295,7 +317,6 @@ def create_app(daemon) -> FastAPI:
 
             login_sessions[session_id] = {
                 "playwright": playwright,
-                "browser": browser,
                 "context": context,
                 "page": page,
                 "opened_url": opened_url,
@@ -311,8 +332,8 @@ def create_app(daemon) -> FastAPI:
             try:
                 if "playwright" in locals():
                     try:
-                        if "browser" in locals():
-                            await browser.close()
+                        if "context" in locals():
+                            await context.close()
                     except Exception:
                         pass
                     await playwright.stop()
@@ -388,7 +409,6 @@ def create_app(daemon) -> FastAPI:
         try:
             await session["page"].close()
             await session["context"].close()
-            await session["browser"].close()
             await session["playwright"].stop()
         except Exception:
             pass
